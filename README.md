@@ -1,2 +1,1 @@
-# Coffee
-Quality
+# Coffee Quality
