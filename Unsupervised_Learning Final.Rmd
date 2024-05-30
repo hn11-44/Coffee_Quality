@@ -1,0 +1,631 @@
+---
+title: "Unsupervised Learning Algorithm"
+output: html_document
+date: "2024-01-07"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.width=20, fig.height=15) 
+```
+
+## Supervised Learning 
+
+## Loading Libraries
+
+
+```{r}
+library(dplyr)
+library(cluster)
+library(dplyr)
+library(factoextra)
+library(ggplot2)
+library(gridExtra)
+library(caret)
+library(mclust)
+library(knitr)
+library(dbscan)
+library(fpc)
+library(FactoMineR)
+library(rrcov)
+
+```
+
+
+## Preprocessing Data 
+
+```{r}
+# Loading the dataset 
+url <- "https://raw.githubusercontent.com/jldbc/coffee-quality-database/master/data/arabica_data_cleaned.csv"
+coffee <- read.csv(url)
+# Remove empty spaces and replace it with NA
+coffee[coffee == ""] <- NA
+coffee[coffee == " "] <- NA
+
+
+
+# Total Cup Points, Grade and Country of Origin
+coffee <- coffee[coffee$Total.Cup.Points != 0, ]
+# Define the new conditions and corresponding labels
+new_conditions <- c(-Inf, 79, 84.99, 90, Inf)  # Updated conditions
+new_labels <- c("Commodity", "Very Good", "Excellent", "Outstanding")
+# Create the 'Grade' column based on the updated conditions
+coffee$Grade <- cut(coffee$Total.Cup.Points, breaks = new_conditions, labels = new_labels, right = TRUE)
+coffee$Country.of.Origin <- ifelse(is.na(coffee$Country.of.Origin), "Colombia",coffee$Country.of.Origin)
+
+# Checked the NA in Country of Origin and replaced it within the Columbia after checking the Region
+coffee$Country.of.Origin <- ifelse(is.na(coffee$Country.of.Origin), "Colombia",coffee$Country.of.Origin)
+
+
+
+# Altitude Mean Meters 
+# Make a copy of the variable and keep in the column altitude_mean_meters_new
+coffee$altitude_mean_meters_new = coffee$altitude_mean_meters
+# Correction of error      
+coffee$altitude_mean_meters_new = ifelse(coffee$altitude_mean_meters_new == 190164, 1901.64, coffee$altitude_mean_meters_new)
+# Create a function to convert the instances where coffee is registered in feet to meters
+feet_to_meters <- function(feet) {
+  conversion_factor <- 0.3048
+  meters <- feet * conversion_factor
+  return(meters)
+}
+# Altitude that was registered by the Coffee Quality Institution and the Country of origin was Myanmar were recorded in feet
+condition_1 = coffee$In.Country.Partner == "Coffee Quality Institute"
+condition_2 = coffee$Country.of.Origin == "Myanmar"
+rows_to_update <- c(216, 838, 1002, 1270)
+coffee$altitude_mean_meters_new[rows_to_update] <- feet_to_meters(coffee$altitude_mean_meters_new[rows_to_update])
+# Correction of data entry and conversion errors
+coffee$altitude_mean_meters_new[c(544, 629, 1041, 1204)] <- c(1100, 1800, 1100, 1200)
+# We will be storing the rows to be updated and multiply the values by 1000
+rows_to_update = c(482, 280, 614, 684, 738, 762, 781,  839, 840, 878, 964)
+coffee$altitude_mean_meters_new[rows_to_update] = coffee$altitude_mean_meters_new[rows_to_update] * 1000
+rows_to_update_2 = c(42, 43, 786, 899)
+coffee$altitude_mean_meters_new[rows_to_update_2] = coffee$altitude_mean_meters_new[rows_to_update_2] * 100
+
+
+
+# Bag Weight and Total Weight 
+# We will create a new variable called Num.Bag.Weight to convert the characters to numeric value.
+coffee$Num.Bag.Weight = coffee$Bag.Weight
+
+#Treating the Bag.Weight variable by converting its lbs value to kg and then to numeric
+# Identify values in pounds
+is_lbs <- grepl(" lbs", coffee$Num.Bag.Weight)
+# Identify values in kg
+is_kg <-grepl(" kg", coffee$Num.Bag.Weight)
+# Remove " lbs" from variable
+coffee$Num.Bag.Weight[is_lbs] <- gsub(" lbs", "", coffee$Num.Bag.Weight[is_lbs])
+# Remove " kg" from variable
+coffee$Num.Bag.Weight[is_kg] <- gsub(" kg", "", coffee$Num.Bag.Weight[is_kg])
+# Convert pound values to kg and store them back as numeric value
+coffee$Num.Bag.Weight[is_lbs] <- as.numeric(coffee$Num.Bag.Weight[is_lbs]) * 0.45359237
+# Convert kg values to numeric
+coffee$Num.Bag.Weight[is_kg] <- as.numeric(coffee$Num.Bag.Weight[is_kg])
+# Round the values to decimal places
+coffee$Num.Bag.Weight <- round(as.numeric(coffee$Num.Bag.Weight), 2)
+coffee$Total.Weight = (coffee$Num.Bag.Weight * coffee$Number.of.Bags)
+
+
+# Log(x + 1) tranfromation to values that are skewed data with 0 values
+coffee <- coffee %>%
+  mutate(
+    Log.Total.Weight = log(Total.Weight + 1),
+    Log.Category.One.Defects = log(Category.One.Defects + 1),
+    Log.Category.Two.Defects = log(Category.Two.Defects + 1))
+
+
+# Reordering, Missing Categories and Character to Factor
+coffee_clean <- dplyr::select(coffee, Grade, Total.Cup.Points, Aroma, Flavor, Aftertaste, 
+                              Acidity, Body, Balance, Uniformity, Clean.Cup,
+                             Sweetness, Cupper.Points, Log.Category.One.Defects, Log.Category.Two.Defects, 
+                            Quakers, Moisture, altitude_mean_meters_new, Log.Total.Weight, 
+                        Variety, Color, Processing.Method, Country.of.Origin, In.Country.Partner)
+
+# Replace the missing categorical NAs with "Unknown"
+coffee_clean <- coffee_clean %>%
+  mutate(
+    Color = coalesce(Color, "Unknown"),
+    Variety = coalesce(Variety, "Unknown"),
+    Processing.Method = coalesce(Processing.Method, "Unknown"),
+    
+  )
+
+# Convert variables stored as character into factors 
+convert_characters_to_factors <- function(data) {
+  # Identify character columns
+  char_cols <- sapply(data, is.character)
+  
+  # Convert character columns to factors
+  data[char_cols] <- lapply(data[char_cols], as.factor)
+  
+  # Return the modified data frame
+  return(data)
+}
+
+
+
+coffee_clean <- convert_characters_to_factors(coffee_clean)
+coffee_complete =  coffee_clean[complete.cases(coffee_clean), ]
+```
+
+
+
+These are the questions we would like to answer:
+
+
+1. Can we find characteristics that help us identify sensory and non-sensory characteristics that differentiate the quality of coffee beans?
+2. Are there natural groupings based on sensory and  non-sensory features?
+2. Can we find distinct clusters based on the sensory and the non-sensory features for coffee bean grade?
+
+We would like to find patterns that we may discover and that may not be apparent at a first glance. Hopefully identifying clusters will help us gain an understanding of characteristics of the different types of coffee. Let us start by checking our data target variable.
+
+```{r}
+# Calculate the percentage of each grade
+grade_percentages <- prop.table(table(coffee_complete$Grade)) * 100
+
+# Create a data frame with grade levels and percentages
+grade_data <- data.frame(Grade = names(grade_percentages),
+                         Percentage = as.numeric(grade_percentages))
+
+# Reorder grade levels based on percentage
+grade_data$Grades <- factor(grade_data$Grade, levels = grade_data$Grade[order(-grade_data$Percentage)])
+
+# Create the plot using ggplot2
+barplot_grades <- ggplot(grade_data, aes(x = Grades, y = Percentage, fill = Grades)) +
+  geom_bar(stat = "identity", alpha = 0.5, fill = "orange") +
+  labs(title = "Distribution of Coffee Grades",
+       x = "Grade", y = "Percentage") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+# Display the plot
+print(barplot_grades)
+
+```
+
+```{r}
+table(coffee_complete$Grade)
+```
+
+# Functions Used for Clustering 
+
+```{r}
+compute_cluster_stats <- function(data,num_dimensions,  distance = "euclidean") {
+  # Compute the dissimilarity matrix
+  if (distance == "gower") {
+    diss <- daisy(data$ind$coord[, 1:num_dimensions], metric = distance)
+  } else {
+    diss <- dist(data$ind$coord[, 1:num_dimensions], method = distance)
+  }
+  
+  # Elbow plot
+  elbow <- fviz_nbclust(data$ind$coord[, 1:num_dimensions], pam, method = "wss")
+  
+  # Silhouette plot
+  silhouette <- fviz_nbclust(data$ind$coord[, 1:num_dimensions], pam, method = "silhouette") + theme_minimal()
+  
+  # Calculate gap statistic
+  gap_stat_calc <- clusGap(data$ind$coord[, 1:num_dimensions], FUN = pam, K.max = 10, B = 50)
+  gap_stat <- fviz_gap_stat(gap_stat_calc)
+  
+  # Arrange the plots in a grid
+  plot <- grid.arrange(elbow, silhouette, gap_stat, nrow = 2, ncol = 2)
+  
+  # Return the plot
+  return(plot)
+}
+
+
+perform_pam_and_plot <- function(data, true_labels, centers, num_dimensions, distance = "euclidean") {
+  # Initialize a list to store the plots
+  plots <- list()
+  
+  # Create a data frame for the true labels
+  df_true <- data.frame(data$ind$coord[, 1:num_dimensions], True = true_labels)
+  
+  # Create the plot for true labels
+  plot_true <- ggplot(df_true, aes(x = `Dim.1`, y = `Dim.2`, color = True)) +
+    geom_point(alpha = 0.6, size = 3) +
+    scale_color_brewer(palette = "Set1") +
+    theme_minimal() +
+    labs(
+      title = "Ground Truth",
+      x = "Principal Component 1",
+      y = "Principal Component 2",
+      color = "True Label"
+    ) +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      legend.position = "bottom"
+    )
+  
+  # Add the true labels plot to the list
+  plots <- list(plot_true)
+  
+  # Compute the dissimilarity matrix
+  if (distance == "gower") {
+    diss <- daisy(data$ind$coord[, 1:num_dimensions], metric = distance)
+  } else {
+    diss <- dist(data$ind$coord[, 1:num_dimensions], method = distance)
+  }
+  
+  # Loop over the centers
+  for(i in seq_along(centers)) {
+    # Perform PAM clustering
+    pam_result <- pam(diss, k = centers[i])
+    
+    # Create a data frame for the predicted clusters
+    df_pam <- data.frame(data$ind$coord[, 1:num_dimensions], Predicted = as.factor(pam_result$clustering))
+    
+    # Create the plot for predicted clusters
+    plot_predicted <- ggplot(df_pam, aes(x = `Dim.1`, y = `Dim.2`, color = Predicted)) +
+      geom_point(alpha = 0.6, size = 3) +
+      scale_color_brewer(palette = "Set1") +
+      theme_minimal() +
+      labs(
+        title = paste("Predicted Clusters (k =", centers[i], ")"),
+        x = "Principal Component 1",
+        y = "Principal Component 2",
+        color = "Predicted Cluster"
+      ) +
+      theme(
+        plot.title = element_text(hjust = 0.5),
+        legend.position = "bottom"
+      )
+    
+    # Add the predicted clusters plot to the list
+    plots <- c(plots, list(plot_predicted))
+  }
+  
+  # Calculate the number of rows and columns for the grid
+  ncol <- 3
+  nrow <- ceiling(length(plots) / ncol)
+  
+  # Arrange the plots in a grid
+  do.call(grid.arrange, c(plots, ncol = ncol, nrow = nrow))
+}
+
+
+compute_silhouette <- function(data, centers, num_dimensions, distance = "euclidean") {
+  # Initialize a list to store the plots
+  plots <- list()
+  
+  # Compute the dissimilarity matrix
+  if (distance == "gower") {
+    diss <- daisy(data$ind$coord[, 1:num_dimensions], metric = distance)
+  } else {
+    diss <- dist(data$ind$coord[, 1:num_dimensions], method = distance)
+  }
+  
+  # Loop over the centers
+  for(i in seq_along(centers)) {
+    # Perform PAM clustering
+    pam_result <- pam(diss, k = centers[i])
+    
+    # Check if there are clusters with only one observation
+    if(any(table(pam_result$clustering) == 1)) {
+      next
+    }
+    
+    # Compute silhouette information
+    silhouette_info <- silhouette(pam_result$clustering, diss)
+    
+    # Check if silhouette computation was successful
+    if(is.logical(silhouette_info)) {
+      next
+    }
+    
+    # Create silhouette plot
+    silhouette_plot <- fviz_silhouette(silhouette_info, palette = "jco", ggtheme = theme_classic())
+    
+    # Add the silhouette plot to the list
+    plots[[i]] <- silhouette_plot
+  }
+  
+do.call(grid.arrange, c(plots, nrow = 2))
+}
+
+compute_rand_indices <- function(data, true_labels, centers, num_dimensions, distance = "euclidean") {
+  # Initialize a data frame to store the results
+  results <- data.frame()
+  
+  # Compute the dissimilarity matrix
+  if (distance == "gower") {
+    diss <- daisy(data$ind$coord[, 1:num_dimensions], metric = distance)
+  } else {
+    diss <- dist(data$ind$coord[, 1:num_dimensions], method = distance)
+  }
+  
+  # Loop over the centers
+  for(i in seq_along(centers)) {
+    # Perform PAM clustering
+    pam_result <- pam(diss, k = centers[i])
+    
+    # Compute the Rand Index
+    rand_index <- adjustedRandIndex(true_labels, pam_result$clustering)
+    
+    # Add the result to the data frame
+    results <- rbind(results, data.frame(NumClusters = centers[i], RandIndex = rand_index))
+  }
+  
+  # Return the results
+  return(results)
+}
+
+```
+
+
+
+# Sensory Data Clustering 
+
+In this section we will select sensory data from the coffee_complete data base that we have prepared in the pre-processing stage. The sensory data chosen to work on for the unsupervised learning are scores that are given by the Q-graders to determine the quality of coffee.  So we subset the features Aroma, Flavor, Acidity, Body, Balance and Cupper.Points to determine if these subjective parameters will enable us to identify distinct groups. In this instance we have decided to drop Uniformity, Sweetness and Clean.Cup because the values are uniform and show no varability. It is especially important to remove these features because to conduct PCA features that do not provide variability and do not contribute to the variance will not add any useful information to our anlaysis
+
+### Prepare Data with sensory Features
+
+```{r}
+# Select the sensory variables
+sensory_data <- coffee_complete[, c("Aroma", "Flavor", "Aftertaste", "Acidity", "Body", "Balance")]
+```
+
+### Principal Component Analayis (PCA)
+
+In order to begin the analysis for the sensory data we start by conducting a Principal Component Analysis (PCA) so that we can identify the main sensory features that differentiate coffee beans. This will enable us to focus extract new features from the data that are a linear combination of the original variables. Since the senory attributes are highly correlated with each other this will be great step in order to untangle them and capture them and focusing on the data with the largerst variance. 
+
+
+
+
+```{r}
+# Perform PCA
+pca_sensory <- PCA(sensory_data, scale.unit=TRUE, ncp=5, graph=FALSE)
+summary(pca_sensory)
+```
+The first principal component explains approximately 74.39% of the total variance, while the second principal component explains 7.74% of the variance. Cumulative proportion of variance that is explained by the first two principal component is around 82.1% of the total variance in the data.This shows that the data can largely be summarized using the first two component.  
+
+
+
+```{r}
+scree_sensory <- fviz_eig(pca_sensory, addlabels = TRUE, ylim = c(0, 80), main = "Scree Plot Sensory Data", fill = "orange")
+contribution_sensory <- fviz_cos2(pca_sensory, choice = "var", axes = 1:2)
+var_contrbution_sensory <- fviz_pca_var(pca_sensory, repel = TRUE, 
+                col.var = "contrib", # Color by contributions to the PC
+                gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07") )
+habillage_var <- fviz_pca_biplot(pca_sensory, label= "var", habillage = coffee_complete$Grade)
+grid.arrange(scree_sensory, contribution_sensory, var_contrbution_sensory, habillage_var, ncol = 2, nrow = 2)
+
+```
+
+In order to visualize the the result from the principal component anlaysis on the sensory features we will be using various plots. The first one we have utilized is the scree plot which plots the variance explained by the principal components. We can see in that the first principal component explains around 74% of the variance and the second principal component explains 7.7% of the variance. This will enable us to decide on the amount of dimensions from the principal component we should utilize for further analysis. 
+
+The second plot shows the representation of each of the variables. We have used the first two dimensions to determine how  each of the variables are represented. The higher level of the cosine squared the better the variable is represented. Hence we can see from the plot that Flavor and Aroma are well-represented, followed by Aftertaste. 
+
+The third plot we have utilized is the variable contribution plot which shows the contribution of each plot to the dimensions of the principal components. From the plot we can see that Aroma and Flavor contribute significantly to the first principal component where as the Aroma and Body significantly to the second principal component. 
+
+Lastly the biplot allows us to combine the information of the individual data points and the variables. The projects of the individual data points and the sensory variables onto the principal components. We can see from the plot that coffee that have are similar will be close together on the plot and variables that are correlated will point to the same direction. 
+
+From the biplot something we can take away is that the Aroma, Flavor, Aftertaste and Acidity are close and pointing to the same direction suggesting that tend to increase and decrease together. We can see from the individual points that the coffee that are graded commodity (red points) have lower values for most sensory attributes. On the other hand coffee graded outstanding (purple point) tens to have higher value indicating that these having a high score of these sensory attribute increases the potential grade of the coffee. The Body attribute is less correlated with the other sensory attribute and this could be influenced by other factors such as the brewing methods which is not captured. 
+
+### K-Medoids 
+
+Before clustering the data points on we will be assessing the optimal number of clusters that we need using the three common techniques. We are using the PCA of the data in order to determine the optimal number of data clusters.
+
+
+```{r}
+sensory_plot_clusters <- compute_cluster_stats(pca_sensory,2, distance = "euclidean")
+```
+
+
+We have used the "elbow method" which utilizes the within cluster sum of squares and evaluates where it decreases at a slower rate in order to determine the optimal number of clusters. We can see that this occurs at 3 or 4 suggesting that could be the best number of cluster. 
+
+Secondly we have utilized the silhouette method which measures how similar each data point is within it own cluster compared to other clusters. And based on the vertical line we can see that best number of cluster is 2 according to the silhouette method. 
+
+Lastly we have utilized the gap statistics which compares the variation intra-clusters for different values of k with expected values under null reference distribution of data. The gap statistic suggests that the best number of cluster would be to have no clusters. But usually since the higher gap statistics suggest the best value for clustering we will consider 4. 
+
+
+
+```{r}
+pam_sensory <- perform_pam_and_plot(pca_sensory, coffee_complete$Grade, centers = c(2, 3, 4, 5, 6), 2, distance = "euclidean")
+```
+
+The plot below shows the results of PAM clustering on the two principal component dimensions data with different levels of clustering that we have obtained from the elbow, silhouette and the gap statistics methods. We have used the ground truth as a way to compare the results that we get from the remaining clusters. 
+
+With k = 2 we can see that the data points are divided into two clusters. When compared to the ground truth we can see that finer group distinction are not captured. With k = 3, the separation somewhat resembles the ground truth but far from perfect. As we increase we can seem to be replicating the true label. We can see that this is occurring by the Very Good graded coffee from the true label being split into further clusters and the Commodity and Excellent coffee being represented better in when the number of clusters reaches six. 
+
+
+```{r}
+# Use the function
+silhouette_plots_sensory <- compute_silhouette(pca_sensory, centers = c(2, 3, 4, 5), 2, distance = "euclidean")
+
+```
+
+
+The plots above are a way to show the similarity of each data point within its cluster compared to other data points in other clusters. The higher the average the silhouette width indictaed that the points are well clustered. When our number of cluster is k = 2, the average silhouette is 0.44, which indicates correct clustering. By increasing the number of clusters to k = 3, we can see that the average silhouette width decreases to 0.38, with some data points in cluster 1 and 3 belonging to the adjacent cluster. However all three clusters are positive and they indicate uniqueness. As we increase the number of clusters we can see that the average silhouette drops to 0.34 with all clusters having data points that belong in the adjacent clusters. Thus it would be wise to consider the number of clusters that would have two to three clusters because theu offer a reasonable of distinct groups while also maintaining higher avereage silhouette width. 
+
+
+```{r}
+rand_indices_sensory <- compute_rand_indices(pca_sensory, coffee_complete$Grade, centers = 2:7, 2, distance = "euclidean")
+
+rand_indices_sensory
+
+
+```
+
+Now as an external validation we will be using the Rand Index which measures the similarity between two data clustering by using the true labels ranging from 0 to 1, with 1 indicating that the cluster being identical to the true labels and 0 indicates that clustering are dissimilar. We can see from the table that when k = 5 the Rand Index is at its highest and matches the plot of the clustered plots. With other values of clusters we can see that index is quite low when compared to k = 5. This suggests that having five cluster is the most similar to the ground truth but we have to also acknowledge that the index is still relatively low. 
+
+# Non-Sensory Data Clustering
+
+Now in the next stage we are moving into analysing the non-sensory data, which is comprised of altitude_mean_meters, Log.Category.One.Defects, Log.Category.Two.Defects, Quakers, Moisture, Log.Total.Weight, Country.Of.Origin, Processing.Methods, Variety, Color and In.Country.Partners. In this section we have both continuous and categorical variable thus we will be applying FAMD, which is a mix between PCA and multiple correspondence analysis. By now it is easy to understand that we are not using the dimensional reduction as a common technique used to cluster while retaining as much information about the original data. 
+
+
+
+```{r}
+
+# Set up the non_sensory_data 
+non_sensory_data <- coffee_complete[, c("altitude_mean_meters_new", "Log.Category.One.Defects", "Log.Category.Two.Defects", "Quakers", "Moisture", "Log.Total.Weight", "Country.of.Origin", "Processing.Method", "Variety", "Color","In.Country.Partner")]
+
+
+```
+
+
+### Factor Analaysis on Mixed Data on Non-Senory
+
+```{r}
+
+# Conduct a Factory Analysis on Miced Data on the Non-Sensory Data 
+famd_non_sensory <- FAMD(non_sensory_data, graph = FALSE, ncp = 60)
+
+# Print the data for interpretation
+summary(famd_non_sensory)
+
+
+```
+
+In this section we have implemented the factory analysis of mixed data in order to incorporate categorical and numerical attributes within from the data. The percentage of the variance that is explained by the first principal component is 3.50% and the variance explained by the second principal component is 3.05% with a cumulative percentage variance totaling around 6.56%. 
+
+In this instance we have included the principal components that explain 80% of the variance. In this case we will be considering 53 of the principal components. In order to extract more meaning from the plots let us try to plot different ways of interpreting the results. Also it is important to note that the altitude_mean_meters and Log.Total.Weight are well represented when compared to the rest of the variables. 
+
+
+```{r}
+scree_non_sensory <- fviz_eig(famd_non_sensory, addlabels = TRUE, ylim = c(0, 5), ncp = 45, main = "Scree Plot Non-Sensory Data") + geom_hline(yintercept = 1, color = "red", linetype = "dashed", size = 1)
+contribution_non_sensory <- fviz_cos2(famd_non_sensory, choice = "var", axes = 1:36)
+var_contribution_non_sensory <- var_contribution_non_sensory <- fviz_mca_var(famd_non_sensory, repel = TRUE, 
+                col.var = "contrib",
+                ncp = 36,
+                gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
+
+numericals_non_sensory <- fviz_famd_var(famd_non_sensory, "quanti.var", col.var = "contrib", 
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+
+habillage_var_famd <- fviz_mca_biplot(famd_non_sensory, 
+                                      label = "var",
+                                      ncp = 36, 
+                                      habillage = coffee_complete$Grade, 
+                                      select.var = list(contrib =6), # Select top 5 contributing variables
+                                      labelsize = 4, # Increase the size of the labels
+                                      pointsize = 2)
+grid.arrange(scree_non_sensory, contribution_non_sensory, var_contribution_non_sensory, habillage_var_famd)
+
+
+```
+
+The first plot shows us the scree plot for the non-sensory data and we saw that since we can only explain a small variation of the data we have included many dimensions in order to find dimension where the decrease in eigenvalues become less pronounced. In addition we have included the Kaiser criterion which a rule of thumb that is commonly used to retain the component with eigenvalues greater than 1. The logic is that any variable on it own would have an eigen value of 1 so any component should explain the variance of more than 1 variable to be considered significant. We can see that the cutoff dimension using this rule of thumb is 35 principal components. 
+
+In the second plot we have the representation of the variables over the 53 dimensions that would give us a cumulative of 80% variance. We can see that Log.Total.Weight and altitude_mean_meters are well represented in the first principal components. From the plot we can see that In.Country.Partners and Country.of.Origin have the largest contributions indicating these two factors have a great influence in the variability of the data. Then followed by Processing.Method and Color also have a notable contribution to the variability in the data, whereas the altitude_mean_meters and both of the defects, Moisture and Quakers have lower contributions. 
+
+From the third plot we can see that the variables having the lowest on the lower left Quakers, Log.Category.One.Defect and Log.Category.Two.Defects have low contribution but are somewhat correlated. Also we can see that altitude_new_meters and Moisture might be correlated and also show a somewhat higher level of contribution when compared to the defects. Log.Total.Weight has alos a higher contribution when compared to the defects but it also is not correlated with any other variables. Similarly, the contribution of Processing.Methods and Color are correlated and have similar contribution as Log.Total.Weight. 
+
+When evaluating In.Country.Partners and Country.of.Origin we can see that these two attributes are related and are positioned on the top right corner of the plot indicating that they have a positive correlation. The fact that they are related makes sense because the Country.of.Origin will either have a local In.Country.Partner usually. Variety on the other is isolated and the characteristics are not shared by others. 
+
+When we compare the last biplot from the non-sensory to the sensory we can see that the data points representing the Commodity and Excellent grade are scattered with no clear clusters. Where as the grade Very Good is clustered almost everywhere but we cannot get extract any insight from the position of the variables and the data points. So we will be conducting a k-medoid clustering. 
+
+### K-Medoids Clustering Non-Sensory
+
+
+```{r}
+cluster_stats_non_sensory <- compute_cluster_stats(famd_non_sensory,2, distance = "gower")
+
+```
+
+The common approach for the "elbow method" is look for an elbow which usually signifies where the within sum of squares slows down significantly after 4 clusters but what seems like an "elbow" is around 5 number of clusters. When evaluating the silhouette methods the score peaks at 5 number of clusters. Where as the gap statistics shows the highest to be around 6 clusters. So in the next stage we will be using different values of clusters to plot how they are clustered using k-medoids. 
+
+
+```{r}
+clusters_non_sensoy <- perform_pam_and_plot(famd_non_sensory, coffee_complete$Grade, centers = c(3, 4, 5, 6, 7), 2, distance = "gower")
+```
+
+Performing the PAM clustering shows that our data that consists of two principal components from the factor analysis of mixed data. The plot shows that the k = 5 seems to be a good balance for the data set. 
+
+
+```{r}
+silhouette_plots_non_sensory <- compute_silhouette(famd_non_sensory, centers = c(2, 3, 5, 6, 7), 2, distance = "gower")
+```
+
+We can see that when the cluster are as also as two or three the average silhouette width are very low with 0.28 and 0.35 respectively. But as the number of clusters increase the average silhouette width increases to 0.47 when the number of clusters k = 9. But we can we can see when k = 5 we have most of the data points that have a positive silhouette score indicating that two clusters have a well matched data points and two  that have some data points that are negative, meaning they can be classified in the adjacent clusters. Overall wee see that some data points are being classified to the adjacent cluster suggesting there might be some overlap between clusters which can be confirmed from the previous plot. 
+
+
+```{r}
+
+rand_indices_non_sensory <- compute_rand_indices(famd_non_sensory, coffee_complete$Grade, centers = 2:10, 2, distance = "gower")
+rand_indices_non_sensory
+```
+
+The Rand index from the non-sensory attribute shows the data clustering between two data clustering in this case we are comparing the different number of clusters with the ground truth. We can see that most of the scores are low which show that none of the cluster are a good match with the ground truth. However when k = 8 in this case whos that it is the highest, which means it is the better match with the ground truth relative to the other clusters. 
+
+
+# Sensory & Non-Sensory 
+
+In this stage we will be combining both the sensory and non-sensory data to create a data frame with all of the features.
+
+```{r}
+# In the following we combine and conduct the same analysis
+all_features <- cbind(non_sensory_data, sensory_data)
+
+
+
+```
+
+
+### Factor Analysis on Mixed Data 
+
+
+As we have done before we will start by conduct a factor analysis on the mixed data to create data that is represented using the principal compinent for further clustering. 
+
+```{r}
+famd_all_features <- FAMD(all_features, graph = FALSE, ncp = 60)
+summary(famd_all_features)
+```
+
+Based on the result we can see that the variance that is explained by the first principal component is 5.44% and the second principal component explains 2.9% of the variability. The fist 60 dimensions explain 84% of the variability in the data. 
+
+
+```{r}
+
+scree_all <- fviz_eig(famd_all_features, addlabels = TRUE, ylim = c(0, 10), ncp = 15, main = "Scree Plot Non-Sensory Data") + geom_hline(yintercept = 1, color = "red", linetype = "dashed", size = 1)
+contribution_all <- fviz_cos2(famd_non_sensory, choice = "var", axes = 1:29)
+var_contribution_all  <- fviz_mca_var(famd_all_features, repel = TRUE, 
+                col.var = "contrib",
+                ncp = 36,
+                gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"))
+
+numericals_all <- fviz_famd_var(famd_all_features, "quanti.var", col.var = "contrib", 
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+
+habillage_all <- fviz_mca_biplot(famd_all_features, 
+                                      label = "var",
+                                      ncp = 54, 
+                                      habillage = coffee_complete$Grade, 
+                                      select.var = list(contrib =6), # Select top 5 contributing variables
+                                      labelsize = 4, # Increase the size of the labels
+                                      pointsize = 2)
+grid.arrange(scree_all, contribution_all, var_contribution_all, habillage_all)
+
+```
+
+
+The scree plot shows noticeable decline after the first few dimensions and then the decline slows down. We can see that the biplot shows that clusters colored different representing different coffee greens can be clustered. When we compare this result with the the factor analysis on non-sensory data we can see that the distinct that were noticed in the factor analysis with sensory attributes are showing up.
+
+### K-Medoid Clustering Sensory & Non-Sensory 
+
+
+```{r}
+cluster_stats_all_features <- compute_cluster_stats(famd_all_features, 2, distance = "gower")
+```
+
+When analyzing the "elbow" method we can see that the within sum of square (wss) drops quickly after the fifth cluster. However the "elbow" seems like it is formed around seventh clusters. When looking at the silhouette method we can see the optimal number of cluster that is represented by the vertical line is around 8 number of clusters. Where as the gap statistics increases without a clear maximum allowing us to determine the optimal number of clusters. Let us utilize the usual k-medoid cluster for different values of k to see what would be the outcome. 
+
+```{r}
+clusters_all_features <- perform_pam_and_plot(famd_all_features, coffee_complete$Grade, centers = c(3, 4, 5, 6, 8) ,2,  distance = "gower")
+```
+
+When we compare the clusters with the ground truth we can see some inconsistencies in how they are being clustered. For example when k = 3 we can see that the coffee grade that is characterized as Very Good is the one that is being clustered into two different groups. The fact that there is an overlap is persistent for all of the clustered with no clear delineation being visible. 
+```{r}
+silhouette_all_features <- compute_silhouette(famd_all_features, centers = c(3, 4, 5, 6, 8), 2, distance = "gower")
+```
+
+```{r}
+rand_indices_all_features <- compute_rand_indices(famd_all_features, coffee_complete$Grade, centers = 2:10,2,  distance = "gower")
+rand_indices_all_features
+```
+

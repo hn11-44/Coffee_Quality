@@ -1,0 +1,1163 @@
+---
+title: "Analysis Coffee"
+output: html_document
+date: "2023-12-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+
+```{r, message = FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(psych)
+library(patchwork)
+library(naniar)
+library(cowplot)
+library(caret)
+library(patchwork)
+library(forcats)
+library(ggrepel)
+library(naniar)
+library(rpart)
+library(caret)
+library(caTools)
+library(party)
+library(magrittr)
+library(e1071)
+library(ROSE)
+library(caret)
+library(psych)
+library(cowplot)
+library(GGally)
+library(DMwR)
+library(ROSE)
+library(stringr)
+library(rpart.plot)
+library(pROC)
+library(gridExtra)
+library(randomForest)
+library(gbm)
+library(rsample)
+library(recipes)
+library(xgboost)
+library(viridis)
+library(embed)
+library(vtreat)
+library(h2o)
+library(dataPreparation)
+library(knitr)
+```
+
+
+```{r}
+knitr::opts_chunk$set(fig.width=20, fig.height=15) 
+```
+
+
+# Preprocessing and Cleaning 
+
+```{r, warnings = FALSE, message = FALSE}
+# Loading the dataset 
+url <- "https://raw.githubusercontent.com/jldbc/coffee-quality-database/master/data/arabica_data_cleaned.csv"
+coffee <- read.csv(url)
+# Remove empty spaces and replace it with NA
+coffee[coffee == ""] <- NA
+coffee[coffee == " "] <- NA
+
+# Subsetting all of the 
+coffee <- dplyr::select(coffee, Total.Cup.Points, Aroma, Flavor, Aftertaste, Acidity, 
+                        Body, Balance, Uniformity, Clean.Cup,
+                        Sweetness, Cupper.Points, Category.One.Defects, Category.Two.Defects, 
+                        Quakers, Moisture, altitude_mean_meters,
+                        Number.of.Bags, Bag.Weight, Variety, Color, Processing.Method, 
+                        Country.of.Origin, In.Country.Partner)
+
+
+# Total Cup Points, Grade and Country of Origin
+coffee <- coffee[coffee$Total.Cup.Points != 0, ]
+# Define the new conditions and corresponding labels
+new_conditions <- c(-Inf, 79, 84.99, 90, Inf)  # Updated conditions
+new_labels <- c("Commodity", "Very Good", "Excellent", "Outstanding")
+# Create the 'Grade' column based on the updated conditions
+coffee$Grade <- cut(coffee$Total.Cup.Points, breaks = new_conditions, labels = new_labels, right = TRUE)
+coffee$Country.of.Origin <- ifelse(is.na(coffee$Country.of.Origin), "Colombia",coffee$Country.of.Origin)
+
+
+
+# Altitude Mean Meters 
+# Make a copy of the variable and keep in the column altitude_mean_meters_new
+coffee$altitude_mean_meters_new = coffee$altitude_mean_meters
+# Correction of error      
+coffee$altitude_mean_meters_new = ifelse(coffee$altitude_mean_meters_new == 190164, 1901.64, coffee$altitude_mean_meters_new)
+# Create a function to convert the instances where coffee is registered in feet to meters
+feet_to_meters <- function(feet) {
+  conversion_factor <- 0.3048
+  meters <- feet * conversion_factor
+  return(meters)
+}
+# Altitude that was registered by the Coffee Quality Institution and the Country of origin was Myanmar were recorded in feet
+condition_1 = coffee$In.Country.Partner == "Coffee Quality Institute"
+condition_2 = coffee$Country.of.Origin == "Myanmar"
+rows_to_update <- c(216, 838, 1002, 1270)
+coffee$altitude_mean_meters_new[rows_to_update] <- feet_to_meters(coffee$altitude_mean_meters_new[rows_to_update])
+# Correction of data entry and conversion errors
+coffee$altitude_mean_meters_new[c(544, 629, 1041, 1204)] <- c(1100, 1800, 1100, 1200)
+# We will be storing the rows to be updated and multiply the values by 1000
+rows_to_update = c(482, 280, 614, 684, 738, 762, 781,  839, 840, 878, 964)
+coffee$altitude_mean_meters_new[rows_to_update] = coffee$altitude_mean_meters_new[rows_to_update] * 1000
+rows_to_update_2 = c(42, 43, 786, 899)
+coffee$altitude_mean_meters_new[rows_to_update_2] = coffee$altitude_mean_meters_new[rows_to_update_2] * 100
+# Dropping an outlier that is not plausible with a value that is one from Kenya 
+coffee<- subset(coffee, !(altitude_mean_meters_new == 1 & Country.of.Origin == 'Kenya'))
+
+
+
+
+
+# Bag Weight and Total Weight 
+# We will create a new variable called Num.Bag.Weight to convert the characters to numeric value.
+coffee$Num.Bag.Weight = coffee$Bag.Weight
+
+#Treating the Bag.Weight variable by converting its lbs value to kg and then to numeric
+# Identify values in pounds
+is_lbs <- grepl(" lbs", coffee$Num.Bag.Weight)
+# Identify values in kg
+is_kg <-grepl(" kg", coffee$Num.Bag.Weight)
+# Remove " lbs" from variable
+coffee$Num.Bag.Weight[is_lbs] <- gsub(" lbs", "", coffee$Num.Bag.Weight[is_lbs])
+# Remove " kg" from variable
+coffee$Num.Bag.Weight[is_kg] <- gsub(" kg", "", coffee$Num.Bag.Weight[is_kg])
+# Convert pound values to kg and store them back as numeric value
+coffee$Num.Bag.Weight[is_lbs] <- as.numeric(coffee$Num.Bag.Weight[is_lbs]) * 0.45359237
+# Convert kg values to numeric
+coffee$Num.Bag.Weight[is_kg] <- as.numeric(coffee$Num.Bag.Weight[is_kg])
+# Round the values to decimal places
+coffee$Num.Bag.Weight <- round(as.numeric(coffee$Num.Bag.Weight), 2)
+coffee$Total.Weight = (coffee$Num.Bag.Weight * coffee$Number.of.Bags)
+
+# Transforming Total.Weight, Category.One.Defects and Category.Two.Defects 
+
+#coffee <- coffee %>%
+  #mutate(
+    #Log.Total.Weight = log(Total.Weight + 1),
+    #Log.Category.One.Defects = log(Category.One.Defects + 1),
+    #Log.Category.Two.Defects = log(Category.Two.Defects + 1))
+
+
+# Reordering, Missing Categories and Character to Factor
+coffee_clean <- dplyr::select(coffee, Grade, Total.Cup.Points, Aroma, Flavor, Aftertaste, 
+                              Acidity, Body, Balance, Uniformity, Clean.Cup,
+                             Sweetness, Cupper.Points, Category.One.Defects,Category.Two.Defects, 
+                            Quakers, Moisture, altitude_mean_meters_new, Total.Weight, 
+                        Variety, Color, Processing.Method, Country.of.Origin, In.Country.Partner)
+
+# Replace the missing categorical NAs with "Unknown"
+coffee_clean <- coffee_clean %>%
+  mutate(
+    Color = coalesce(Color, "Unknown"),
+    Variety = coalesce(Variety, "Unknown"),
+    Processing.Method = coalesce(Processing.Method, "Unknown"),
+    
+  )
+
+# Convert variables stored as character into factors 
+convert_characters_to_factors <- function(data) {
+  # Identify character columns
+  char_cols <- sapply(data, is.character)
+  
+  # Convert character columns to factors
+  data[char_cols] <- lapply(data[char_cols], as.factor)
+  
+  # Return the modified data frame
+  return(data)
+}
+
+
+
+
+
+# Fixing the categorical variables. 
+# In this stage we are handling all of the categorical variables that have 
+# occurences that are less than three are named rare followed by the variable they represent.
+#In addition, spelling errors are being handled 
+# so that they can be added to the correct group. 
+
+coffee_clean <- coffee_clean %>%
+  mutate(
+    In.Country.Partner = recode(In.Country.Partner,
+                                "Specialty Coffee Ass" = "Specialty Coffee Association",
+                                "Blossom Valley International\n" = "Blossom Valley International"),
+    Country.of.Origin = recode(Country.of.Origin,
+                               "Cote d?Ivoire" = "Ivory Coast"),
+    Variety = as.character(Variety),
+    Variety = ifelse(Variety %in% names(which(table(Variety) <= 3)), "Rare Varieties", Variety),
+    Variety = as.factor(Variety),
+    Country.of.Origin = as.character(Country.of.Origin),
+    Country.of.Origin = ifelse(Country.of.Origin %in% names(which(table(Country.of.Origin) <= 3)), "Rare Countries", Country.of.Origin),
+    Country.of.Origin = as.factor(Country.of.Origin),
+    In.Country.Partner = as.character(In.Country.Partner),
+    In.Country.Partner = ifelse(In.Country.Partner %in% names(which(table(In.Country.Partner) <= 3)), "Rare Partners", In.Country.Partner),
+    In.Country.Partner = as.factor(In.Country.Partner)
+  )
+
+# Remove unused levels
+coffee_clean$In.Country.Partner <- droplevels(coffee_clean$In.Country.Partner)
+coffee_clean$Country.of.Origin <- droplevels(coffee_clean$Country.of.Origin)
+coffee_clean$Variety <- droplevels(coffee_clean$Variety)
+
+# Convert variables stored as character into factors 
+convert_characters_to_factors <- function(data) {
+  # Identify character columns
+  char_cols <- sapply(data, is.character)
+  
+  # Convert character columns to factors
+  data[char_cols] <- lapply(data[char_cols], as.factor)
+  
+  # Return the modified data frame
+  return(data)
+}
+
+
+coffee_clean <- convert_characters_to_factors(coffee_clean)
+# Dropping the factor level Outstanding because we only have one observation
+coffee_clean$Grade <- droplevels(coffee_clean$Grade, exclude = "Outstanding")
+# Complete Case (we are dropping all of the values that have NAs)
+
+
+coffee_complete =  coffee_clean[complete.cases(coffee_clean), ]
+
+
+
+```
+
+Based on our preliminary and exploratory data analysis we have cleaned the data for analysis. Let us inspect the number of categorical variables and numerical variables that are within the data frame. 
+
+```{r}
+# Creating a function that would enable me to count the number of
+#numerical variables and categorical variables.
+
+count_data_types <- function(data) {
+  # Count numerical variables
+  numerical_count <- sum(sapply(data, function(x) is.numeric(x)))
+
+  # Count categorical variables
+  categorical_count <- sum(sapply(data, function(x) is.factor(x) || is.character(x)))
+
+  # Return a named list with counts
+  return(list(
+    numerical = numerical_count,
+    categorical = categorical_count
+  ))
+}
+variables_in_coffee <- count_data_types(coffee_complete)
+cat("Number of numerical variables:", variables_in_coffee$numerical, "\n")
+cat("Number of categorical variables:", variables_in_coffee$categorical, "\n")
+```
+
+Our final data set has 17 numerical variables and 6 categorical variables. The following analysis will be focused on supervised learning and the aim of is to use different models to: 
+
+1. **Determine the quality of coffee using non-sensory data that are based on objective determinants of coffee.**
+
+2. **Identifying the most important non-sensory characteristics that contribute to coffee quality of beans?**
+
+3. **Is there a model that can accurately predict the grade of coffee bean based on the characteristics?**
+
+The objective parameters (non-sensory data) are: 
+ 
+1.  Category.One.Defects
+2.  Category.Two.Defects
+3.  Quakers  
+4.  Moisture 
+5.  altitude_mean_meters_new 
+6.  Total.Weight
+7.  Variety
+8.  Color 
+9.  Country.of.Origin
+10. In.Country.Partner
+
+
+Our approach will be focused on a classification based approach to determine the quality of the coffee grade. The results from this analysis could be pertinent to coffee producers or farmers by enabling them to use the insights to improve cultivation, exporter or traders to source quality beans before making purchases and roasters to utilize the non-sensory characteristics to source bean quality.
+```{r}
+summary(coffee_complete)
+```
+The dataset has no missing values making it complete. Let us start by examining our target variable which is derived from Total.Cup.Points and called Grade. 
+
+```{r}
+# Calculate the percentage of each grade
+grade_percentages <- prop.table(table(coffee_complete$Grade)) * 100
+
+# Create a data frame with grade levels and percentages
+grade_data <- data.frame(Grade = names(grade_percentages),
+                         Percentage = as.numeric(grade_percentages))
+
+# Reorder grade levels based on percentage
+grade_data$Grades <- factor(grade_data$Grade, levels = grade_data$Grade[order(-grade_data$Percentage)])
+
+# Create the plot using ggplot2
+barplot_grades <- ggplot(grade_data, aes(x = Grades, y = Percentage, fill = Grades)) +
+  geom_bar(stat = "identity", alpha = 0.5, fill = "orange") +
+  labs(title = "Distribution of Coffee Grades",
+       x = "Grade", y = "Percentage") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+# Display the plot
+print(barplot_grades)
+```
+We can see that our target variables is imbalance, with most of the minority class being Very Good and minority classes of Commodity and Excellent. In the analysis we will be using different ways of balancing the data set and then comparing the results to pick the right combination of balancing strategy and the appropriate model to accurately determined the quality of the coffee. 
+
+# Splitting the Data, Balancing Training Data and Formula  
+
+```{r}
+set.seed(123)  # for reproducibility
+# We shuffle the index 
+shuffled_indices <- sample(nrow(coffee_complete))
+split_index <- createDataPartition(coffee_complete$Grade[shuffled_indices], p = 0.7, list = FALSE)
+train_data <- coffee_complete[shuffled_indices[split_index], ]
+test_data <- coffee_complete[shuffled_indices[-split_index], ]
+```
+We shuffle the indices then proceed to split the training data account for 70% of the observation within the entire sample and 30% attributed to the test data. Since our data set is not balanced we will be using oversampling, SMOTE and ROSE as mechanisms to over sample the minority class of levels. We will also build a model using the imbalance data set and compare it how it increases the performance metrics we will be using to evaluate. 
+
+```{r}
+table(train_data$Grade)
+```
+
+The initial model without any oversampling technique shows that there are more observation for the Very Good class than Commodity or Excellent. Let us conduct oversampling in the following code and have all equal observation accross the board with the maximum value being taken from the majority class. The size of the minority class is expanded by bootstrapping, which involves replacing the original data with minority class’s data with new minority observation, or artificially creating new minority observations. 
+
+```{r}
+over_train <- upSample(x = train_data, y = train_data$Grade)
+
+table(over_train$Grade)
+```
+There are all equal instances of each factor. The next one we will use is SMOTE, which is an oversampling approach that generates new minority instances at random from the sample's nearest minority class neighbors. This approach is done using the Euclidean distance between data points in the feature space to determine nearest neighbors.
+
+```{r}
+smote_train <-  DMwR::SMOTE(Grade~. , train_data, perc.over = 600,perc.under= 200)
+smote_train <- DMwR::SMOTE(Grade ~. , smote_train, perc.over = 1000,perc.under=200)
+```
+
+```{r}
+table(smote_train$Grade)
+```
+
+The SMOTE techniques has increased the majority class by four more observations but drastically increasing the remaining classes also. Lastly, Random Oversampling Examples (ROSE) oversampling the minority class by creating synthetic data points that are as similar as possible to the real ones with respect to a probability distribution centered on the selected sample.
+
+```{r}
+# Define the formula for oversampling
+formula_oversample <- Grade ~ .
+
+# Specify the target classes for oversampling
+target_classes <- c("Commodity", "Excellent")
+
+# Subset the data for the target classes
+data_to_oversample <- train_data[train_data$Grade %in% target_classes, ]
+
+# Apply ROSE with the desired sampling strategy
+rose_object <- ROSE(formula_oversample, data = data_to_oversample, p = 0.5, N = 900, seed = 42)
+
+# Extract the oversampled data from the ROSE object
+oversampled_data <- rose_object$data
+
+# Combine original and oversampled data
+rose_train <- rbind(train_data, oversampled_data)
+```
+
+```{r}
+table(rose_train$Grade)
+```
+
+
+```{r}
+list_of_tables <- list(
+  initial_train = table(train_data$Grade),
+  over_train = table(over_train$Grade),
+  smote_train = table(smote_train$Grade),
+  rose_train = table(rose_train$Grade)
+)
+
+
+train_sampling <- bind_rows(list_of_tables, .id = "Train")
+
+train_sampling <- train_sampling %>%
+  mutate(Train = str_replace_all(Train, "_", " ")) %>%
+  mutate(Train = str_to_title(Train))
+
+
+print(train_sampling)
+```
+
+The table shows that the total number of over sampled data. We will be using the different models to assess which oversampling techniques suites best in improving accuracy. To train or models we will be using the objective parameters as part of our formula to predict the Grade of the coffee. 
+
+```{r}
+objective_parameters <- c("Category.One.Defects", "Category.Two.Defects", "Quakers",  "Moisture", "altitude_mean_meters_new", "Total.Weight",
+                            "Variety", "Color", "Country.of.Origin", "In.Country.Partner")
+
+formula <- as.formula(paste("Grade ~", paste(objective_parameters, collapse = " + ")))
+```
+
+
+# k-NN
+
+In the first instance, we use a lazy-learning approach and utilize the k-Nearest Neighbors (k-NN) algorithm to classify quality of the coffee beans. This means we will be using the nearest data points in the feature space to make a classification. We have used performed a grid search over the ranges to determine the best 'k' values. We will be running these on different oversampling techniques we have conducted on the data to handle the imbalance. We have evaluated the models using repeated cross-validation. 
+
+
+```{r}
+# Define pre-processing steps
+preProcess_steps <- c("center", "scale", "nzv", "YeoJohnson")
+
+
+# Define the control function for train()
+ctrl <- trainControl(method = "repeatedcv", repeats = 3)
+# Define the tuning grid
+tuneGrid <- expand.grid(kmax = 1:10, distance = 2, kernel = "gaussian")
+
+# Define the models using the kknn method with Manhattan distance
+set.seed(123)
+model_knn_initial <- train(formula, data = train_data, method = "kknn", preProcess = preProcess_steps, tuneLength = 10, trControl = ctrl, metric = "Kappa", tuneGrid = tuneGrid, na.action = na.omit)
+model_knn_over <- train(formula, data = over_train, method = "kknn", preProcess = preProcess_steps, tuneLength = 10, trControl = ctrl, metric = "Kappa", tuneGrid = tuneGrid, na.action = na.omit)
+model_knn_smote <- train(formula, data = smote_train, method = "kknn", preProcess = preProcess_steps, tuneLength = 10, trControl = ctrl, metric = "Kappa", tuneGrid = tuneGrid, na.action = na.omit)
+model_knn_rose <- train(formula, data = rose_train, method = "kknn", preProcess = preProcess_steps, tuneLength = 10, trControl = ctrl, metric = "Kappa", tuneGrid = tuneGrid, na.action = na.omit)
+```
+
+
+In the code above we conducted a pre-processing technique to handle the scaling, removing near-zero variance predictors and applying the Yeo-Johnsom transformation. We have also used 3 fold cross validation and tuned k to balance for our bias and variance. We will be looking at the visualization of selecting of the k over the training and cross validated results. Then ran the model with the original imbalance data set and also the ones that have been over sampled using Oversampling, SMOTE and ROSE. We have intentionally did this in order to see how the model performs using different oversampling techniques.  
+
+```{r}
+knn_initial_plot <- plot(model_knn_initial, main = "Initial k-NN")
+knn_over_plot <- plot(model_knn_over, main = "Over k-NN")
+knn_smote_plot <- plot(model_knn_smote, main = "SMOTE k-NN")
+knn_rose_plot <- plot(model_knn_rose, main = "ROSE k-NN")
+
+# Arrange the plots
+grid.arrange(knn_initial_plot, knn_over_plot, knn_smote_plot, knn_rose_plot, nrow = 2, ncol = 2)
+
+```
+
+We have created a plot in order to assess how the different numbers of k behave with respect to Accuracy statistics. The data trained on the imbalance data set shows that the best performance is attained at 2 neighbors. Results trained using the oversampling technique shows some fluctuation with the best performance being at 1, 3, 4, 7, 8, 9 and 10. Where as the performance of the data that is trained on the SMOTE shows consistent across different number of neighbors. Lastly data trained on the ROSE indicates that the number of k = 1 exhibits the best performance. 
+ 
+
+
+```{r}
+# Generate predictions on the test data for k-NN
+predictions_initial <- predict(model_knn_initial, newdata = test_data)
+predictions_over <- predict(model_knn_over, newdata = test_data)
+predictions_smote <- predict(model_knn_smote, newdata = test_data)
+predictions_rose <- predict(model_knn_rose, newdata = test_data)
+```
+
+
+### Evaluating Metrics for K-NN
+In the code above we will be using the test_data in order to predict the values. After building each model and predicting on our test_data we will be using the function above to evaluate the different performance of the different models that have been built. We will see how the accuracy changes from the imbalanced data to the different oversampling techniques. We will look at the Accuracy of the model the Precision, Recall and the the F1 score as a way to see the evaluate the performance. We will then evaluate the AUC of one versus the rest performance of the different classes and the the different over sampling techniques that were used when training the model. Finally, the variable importance of the algorithm will be assessed and see if we can draw any insights from the results. 
+
+### Computing Metrics for K-NN
+
+
+```{r}
+# Define the function
+evaluate_model <- function(y_pred, y_true, class_weights = NULL) {
+  # Check that the predictions and y_true are the same length
+  if(length(y_pred) != length(y_true)) {
+    stop("The number of predictions does not match the number of true values.")
+  }
+  
+  # Factorize the predictions and true labels if they are not already factorized
+  if(!is.factor(y_pred)) {
+    y_pred <- as.factor(y_pred)
+  }
+  if(!is.factor(y_true)) {
+    y_true <- as.factor(y_true)
+  }
+  
+  # Create a confusion matrix
+  cm <- confusionMatrix(y_pred, y_true)
+  
+  # Calculate accuracy
+  accuracy <- cm$overall['Accuracy']
+  
+  # Calculate Kappa
+  kappa <- cm$overall['Kappa']
+  
+  # Calculate precision, recall, and F1 score for each class
+  stats_by_class <- cm$byClass[, c('Precision', 'Recall', 'F1')]
+  
+  # Replace NA values with 0
+  stats_by_class[is.na(stats_by_class)] <- 0
+  
+  # Calculate macro averages
+  macro_avg <- colMeans(stats_by_class)
+  
+  # Calculate micro averages
+  tp_fp_fn <- colSums(cm$table)
+  micro_precision <- tp_fp_fn[1] / (tp_fp_fn[1] + tp_fp_fn[3])
+  micro_recall <- tp_fp_fn[1] / (tp_fp_fn[1] + tp_fp_fn[2])
+  micro_f1 <- 2 * ((micro_precision * micro_recall) / (micro_precision + micro_recall))
+  
+  # Combine everything into a data frame
+  results <- rbind(stats_by_class, 'Macro Average' = macro_avg, 'Micro Average' = c(micro_precision, micro_recall, micro_f1))
+  results <- cbind(results, 'Accuracy' = c(rep(accuracy, nrow(stats_by_class)), accuracy, accuracy), 'Kappa' = c(rep(kappa, nrow(stats_by_class)), kappa, kappa))
+  
+  return(results)
+}
+
+
+# Define the function
+evaluate_all_models <- function(predictions_list, y_true, model_names) {
+  # Check that the length of predictions_list and model_names are the same
+  if(length(predictions_list) != length(model_names)) {
+    stop("The number of predictions does not match the number of model names.")
+  }
+  
+  # Initialize an empty list to store results
+  results_list <- list()
+  
+  # Loop over the list of predictions
+  for(i in 1:length(predictions_list)) {
+    # Check that the predictions and y_true are the same length
+    if(length(predictions_list[[i]]) != length(y_true)) {
+      stop(paste("The number of predictions for model", model_names[i], "does not match the number of true values."))
+    }
+    
+    # Evaluate the model and store the results
+    results_list[[i]] <- evaluate_model(predictions_list[[i]], y_true)
+    
+    # Add the model name to the results
+    rownames(results_list[[i]]) <- paste(model_names[i], rownames(results_list[[i]]), sep = "_")
+  }
+  
+  # Combine all results into a single data frame
+  all_results <- do.call(rbind, results_list)
+  
+  return(all_results)
+}
+
+```
+
+After building each model we will be using the function above to evaluate the different performance of the different models that have been built. We will see how the accuracy changes from the imbalanced data to the different oversampling techniques. We will look at the Accuracy of the model the Precision, Recall and the the F1 score as a way to see the evaluate the performance. We will evaluate the AUC performance of the different classes and the the different over sampling techniques that were used when training the model. Finally, the variable importance of the algorithm will be assessed and see if we can draw any insights from the results. 
+
+
+```{r}
+predictions_knn <- list(predictions_initial, predictions_over, predictions_smote, predictions_rose)
+oversampling_names <- list("Initial", "Over", "SMOTE", "ROSE")
+
+
+results_knn <- evaluate_all_models(predictions_knn, test_data$Grade, oversampling_names)
+
+results_knn
+```
+ 
+In the model where we did not conduct any oversampling technique we can see that the model has a high accuracy of 83% with its performance on Very Good being better than its performance over the Commodity and the Excellent classes. This is expected that as the model is trained with a majority of Very Good grade and this would lead to the accuracy level being inflated. When we evaluate the model that are over-sample we can see that the model called Over has an accuracy of 77%, we can see this perform very well on Very Good and performs better on Commodity and Excellent classes compared to the initial model. Our model that has been trained on the SMOTE oversampling technique has the worst accuracy with 63% with lower precision for both the minority classes Commodity and Excellent but a higher recall for Commodity. Lastly when looking at the model that is trained using the ROSE oversampling technique has similar performance than with the Over model with a slight better performance when classifying Excellent and Commodity.When investigating the accuracy we can see that the Over has the highest accuracy with the highest Kappa of 0.17 when compared to the rest. This is followed by the Rose, then the SMOTE. In the next stage we will try to see the AUC-ROC of each class.
+
+### Plotting Results 
+
+In this section we will be plotting the results that from the metrics using the macro averages of the precision, recall and F1.  
+
+```{r}
+
+plot_model_evaluation_macro <- function(evaluation_results, algorithm_name) {
+  # Reshape the data for plotting
+  df <- as.data.frame(evaluation_results)
+  df$Model <- rownames(df)
+  
+  # Only keep the rows you're interested in
+  df <- df[grep("Macro Average", df$Model), ]
+  
+  # Only keep the metrics you're interested in
+  df <- df[, c("Model", "Precision", "Recall", "F1")]
+  
+  df <- tidyr::pivot_longer(df, -Model, names_to = "Metric", values_to = "Value")
+  
+  # Filter out the rows where Value is NA
+  df <- df[!is.na(df$Value), ]
+  
+  # Create the plot
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = Model, y = Value, fill = Metric)) +
+    ggplot2::geom_bar(stat = "identity", position = "dodge") +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
+    ggplot2::labs(title = paste("Evaluation Metrics for", algorithm_name), x = "Model", y = "Value", fill = "Metric") +
+    ggplot2::scale_fill_manual(values = c("#FFB74D", "#FF9800", "#F57C00", "#BF360C", "#3E2723"))
+  
+  return(p)
+}
+
+
+
+
+```
+
+```{r}
+# Create the plots
+macro_plot_knn <- plot_model_evaluation_macro(evaluate_all_models(predictions_knn, test_data$Grade, oversampling_names), rep("K-NN", 5))
+macro_plot_knn
+                                                                                                                             
+
+```
+In addition to the macro-averages we will also be using the accuracy and Cohen's Kapp in order to see how the different oversampling techniques perform. 
+
+```{r}
+plot_model_evaluation_accuracy_kappa <- function(evaluation_results, algorithm_name) {
+  # Reshape the data for plotting
+  df <- as.data.frame(evaluation_results)
+  df$Model <- rownames(df)
+  
+  # Only keep the rows you're interested in
+  df <- df[grep("Commodity", df$Model), ]
+  
+  # Remove the word "Commodity" from the Model names
+  df$Model <- sub("_Class: Commodity", "", df$Model)
+  
+  # Only keep the metrics you're interested in
+  df <- df[, c("Model", "Accuracy", "Kappa")]
+  
+  df <- tidyr::pivot_longer(df, -Model, names_to = "Metric", values_to = "Value")
+  
+  # Filter out the rows where Value is NA
+  df <- df[!is.na(df$Value), ]
+  
+  # Create the plot
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = Model, y = Value, fill = Metric)) +
+    ggplot2::geom_bar(stat = "identity", position = "dodge") +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
+    ggplot2::labs(title = paste("Accuracy-Kappa for", algorithm_name), x = "Model", y = "Value", fill = "Metric") +
+    ggplot2::scale_fill_manual(values = c("#FFB74D", "#FF9800", "#F57C00", "#BF360C", "#3E2723"))
+  
+  return(p)
+}
+
+
+```
+
+```{r}
+accuracy_kappa_knn <- plot_model_evaluation_accuracy_kappa(evaluate_all_models(predictions_knn, test_data$Grade, oversampling_names), rep("K-NN", 5))
+accuracy_kappa_knn
+```
+ 
+
+```{r}
+calculate_multiclass_auc <- function(all_models, model_names, test_data) {
+  # Initialize a list to store the AUC values
+  auc_values <- list()
+  
+  # Loop over the list of models
+  for(i in 1:length(all_models)) {
+    # Get the prediction probabilities for each class
+    prediction_probs <- predict(all_models[[i]], newdata = test_data, type = "prob")
+    
+    # Loop over each class
+    for(class in levels(test_data$Grade)) {
+      # Create a binary vector for the true class labels
+      y_true_binary <- ifelse(test_data$Grade == class, 1, 0)
+      
+      # Calculate the ROC curve
+      roc_obj <- roc(y_true_binary, prediction_probs[,class])
+      
+      # Calculate the AUC
+      auc_value <- auc(roc_obj)
+      
+      # Store the AUC value in the list
+      auc_values[[paste("AUC for", class, "vs rest in", model_names[i], "model")]] <- auc_value
+    }
+  }
+  
+  # Return the list of AUC values
+  return(auc_values)
+}
+
+```
+
+
+### Evaluating Performance AUC for k-NN
+
+
+```{r}
+plot_multiclass_auc <- function(all_models, model_names, algorithms, test_data, colors) {
+  # Initialize a list to store the AUC values
+  auc_values <- list()
+  
+  # Initialize a list to store the plots
+  plot_list <- list()
+  
+  # Loop over the list of models
+  for(i in 1:length(all_models)) {
+    # Create an empty ggplot with white background
+    p <- ggplot() +
+      theme_bw() +  # Change here: set theme to theme_bw() for white background
+      labs(x = 'False Positive Rate', y = 'True Positive Rate',
+           title = paste("AUC-ROC", model_names[i], "Model (Algorithm:", algorithms[i], ")")) +
+      geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey")  # Add 45-degree line
+    
+    # Get the prediction probabilities for each class
+    prediction_probs <- predict(all_models[[i]], newdata = test_data, type = "prob")
+    
+    # Initialize a vector to store the AUC values for each class
+    auc_class_values <- c()
+    
+    # Loop over each class
+    for(class in seq_along(levels(test_data$Grade))) {
+      # Create a binary vector for the true class labels
+      binary.labels <- ifelse(test_data$Grade == levels(test_data$Grade)[class], 1, 0)
+      
+      # Calculate the ROC curve
+      roc_obj <- roc(binary.labels, prediction_probs[,class])
+      
+      # Calculate the AUC
+      auc_value <- auc(roc_obj)
+      
+      # Store the AUC value in the vector
+      auc_class_values <- c(auc_class_values, auc_value)
+      
+      # Create data frame for ROC curve
+      roc_df <- data.frame(FPR = 1 - roc_obj$specificities, TPR = roc_obj$sensitivities)
+      
+      # Add ROC curve to the plot
+      p <- p + geom_point(data = roc_df, aes(FPR, TPR)) + 
+              geom_line(data = roc_df, aes(FPR, TPR), color = colors[class]) +
+              annotate('text', x = .5, y = .5 - 0.1*class,
+                       label = paste0('AUC for ', levels(test_data$Grade)[class], ' vs rest: ~', round(auc_value, digits = 3)),
+                       color = colors[class])
+    }
+    
+    # Calculate the mean AUC for the model
+    mean_auc <- mean(auc_class_values)
+    
+    # Store the mean AUC value in the list
+    auc_values[[paste("Mean AUC for", model_names[i], "model")]] <- mean_auc
+    
+    # Add the plot to the list of plots
+    plot_list[[i]] <- p
+  }
+  
+  # Arrange the plots in a 2 by 2 grid
+  grid.arrange(grobs = plot_list, ncol = 2)
+  
+  # Return the list of AUC values
+  return(auc_values)
+}
+
+
+```
+
+
+
+```{r}
+colors <- c("red", "blue", "green")
+knn_models = list(model_knn_initial, model_knn_over, model_knn_smote, model_knn_rose)
+plot_multiclass_auc(knn_models, oversampling_names, rep("k-NN", 5),  test_data, colors)
+```
+Using the AUC calculated mean and the curve we can see that the highest mean AUC is for the the ROSE followed by the model trained on imbalance data set. Where as the ROSE model has the higher AUC and has a balanced performance across the classes. This indicated that it might be the best model giving importance to all the classes. When we look at the other models that use oversampling techniques with replacement such as Over and SMOTE we can see that their performance is the lowest with 0.59 and 0.56 average AUC, respectively.
+
+### Confusion Matrix for K-NN
+
+```{r}
+plot_confusion_matrix <- function(all_predictions, model_names, algorithms, test_data) {
+  # Initialize a list to store the plots
+  plot_list <- list()
+  
+  # Loop over the list of predictions
+  for(i in 1:length(all_predictions)) {
+    # Get the predicted classes
+    predicted_classes <- all_predictions[[i]]
+    
+    # Ensure that the predicted classes are in the same order as the actual classes
+    predicted_classes <- factor(predicted_classes, levels = levels(test_data$Grade))
+    
+    # Calculate the confusion matrix
+    cm <- confusionMatrix(predicted_classes, test_data$Grade)
+    
+    # Convert the confusion matrix to a data frame
+    cm_df <- as.data.frame(cm$table)
+    
+    # Create a ggplot of the confusion matrix
+    p <- ggplot(data = cm_df, aes(x = Reference, y = factor(Prediction, levels = rev(levels(Prediction))))) +
+      geom_tile(aes(fill = log(Freq)), colour = "white") +
+      scale_fill_gradient(low = "white", high = "orange") +
+      geom_text(aes(label = sprintf("%d", Freq)), vjust = 0.5, hjust = 0.5, fontface = "bold", color = "black") +
+      theme_minimal() + 
+      theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+      labs(x = "Actual", y = "Predicted", fill = "Log(Frequency)",
+           title = paste("Confusion Matrix for", model_names[i], "Model (Algorithm:", algorithms[i], ")"))
+    
+    # Add the plot to the list of plots
+    plot_list[[i]] <- p
+  }
+  
+  # Arrange the plots in a 2 by 2 grid
+  grid.arrange(grobs = plot_list, ncol = 2)
+}
+```
+
+
+```{r}
+plot_confusion_matrix(predictions_knn, oversampling_names, rep("k-NN", 4), test_data)
+```
+For the initial model we can see that it correctly predicts 3 instance as Commodity however miss classifies 21 as Very Good with no instances being classifieds as Excellent. We can see though with the model trained on the imbalanced data set as expected it classifies Very Good correctly 254 instances, but miss classified it 12 times as Commodity and 10 times as Excellent. When we evaluate the Excellent class we can see 3 correct predicted and 19 miss classification of Very Good and no instances of miss classification as Commodity. 
+
+Following this the second plot of the model trained on random sampling with replacement from the minority class we can see that the model performs well on predicting Very Good with 21 miss classified as Excellent and 21 instances miss classified as Commodity The Commodity has been predicted 7 times correctly and 17 instances falsely classified as Very Good. The Excellent class is correctly predicted 6 times correctly and 16 times incorrectly as Very Good. 
+
+For the model that was over samples using SMOTE we can see that again the model performs relatively worse in classifying Very Good with 184 instances classified correctly. Where as there 54 instances it was classified as Commodity and 38 instances where it classified as Excellent. Also there are 9 instances where Commodity was classified correctly and 15 instance where its is miss classified as Very Good. For the Excellent class 8 instances are classified as Excellent however 16 instances are miss classified as Very Good. 
+
+
+Lastly, when we inspect the model that was trained on the ROSE we can see that the model seems to be correctly classify the Very Good better than it does Commodity and Excellent with 219 instances correctly classified as Very Good. Then we can see that 26 instances incorrectly classified as Commodity and 31 incorrectly classified as Excellent. It is also evident that the model classified 8 instances of Excellent correctly and 14 miss classified as Very Good. Lastly the Commodity class is classified correctly for 8 instances and miss classified 16 instances as Very Good. 
+
+# Decision Tree 
+
+In the second stage we use the decision tree algorithm to classify the grade of the coffee. The model will allow us to determine the important features for the decision making process and also serve as a map to enable producers, traders and roasters to gain insight when making a decisions. Decision Tree is also suitable because the data has mixed data types with a weak linear relationship and it would enable us to visualize the decision tree. However since decision trees are prone to over fitting we have build the tree and then used the complexity parameter (cp) to prune our model by minimizing the cross-validation error in the model's complexity table. 
+
+```{r}
+# Train the models using rpart
+model_initial_dt <- rpart(formula, data = train_data, method = "class")
+model_over_dt <- rpart(formula, data = over_train, method = "class")
+model_smote_dt <- rpart(formula, data = smote_train, method = "class")
+model_rose_dt <- rpart(formula, data = rose_train, method = "class")
+
+
+# Function to prune a decision tree and make predictions
+prune_and_predict <- function(model, test_data) {
+  # Prune the tree
+  pruned_model <- prune(model, cp = model$cptable[which.min(model$cptable[,"xerror"]),"CP"])
+  # Make predictions
+  predictions <- predict(pruned_model, newdata = test_data, type = "class")
+  return(predictions)
+}
+
+
+# Apply the function of predicting and pruning to the model we have trained 
+predictions_pruned_initial <- prune_and_predict(model_initial_dt, test_data)
+predictions_pruned_over <- prune_and_predict(model_over_dt, test_data)
+predictions_pruned_smote <- prune_and_predict(model_smote_dt, test_data)
+predictions_pruned_rose <- prune_and_predict(model_rose_dt, test_data)
+
+```
+
+After training the data and predicting over the pruned model so as to avoid over fitting. In order to see the cp and how it performs over the cross validation error of the different oversampling techniques applied. 
+
+```{r}
+plot_multiple_cp <- function(models, oversampling_names) {
+  # Create an empty 2x2 plot layout
+  layout(matrix(1:4, nrow = 2, ncol = 2))
+  
+  # Loop over each model and plot its cp
+  for (i in seq_along(models)) {
+    plotcp(models[[i]], main = oversampling_names[i], col = "orange")
+  }
+}
+
+model_dt <- list(model_initial_dt, model_over_dt, model_smote_dt, model_rose_dt)
+oversampling_names <- list("Initial", "Over", "SMOTE", "ROSE")
+
+plot_multiple_cp(model_dt, oversampling_names)
+```
+
+
+We can see that oversampling and SMOTE have cp values that are similar of 0.01 indicating these trees are larger trees compared to Initial and Rose models. The larger the cp value the smaller the tree might not fit training data well and the smaller the cp value the larger the tree which might overfit the training data. Results from the Over and SMOTE models have the smallest cp values (0.01), suggesting that these models might have larger trees compared to the Initial and ROSE models. We will evaluate the performance of the different oversampling techniques using different metrics and visualization. Let us see how the decision tree splits the different factors and on what basis they are split. 
+
+
+
+```{r}
+# Loop over the list of models
+for(i in 1:length(model_dt)) {
+  # Prune the tree
+  pruned_tree <- prune(model_dt[[i]], cp = model_dt[[i]]$cptable[which.min(model_dt[[i]]$cptable[,"xerror"]),"CP"])
+  
+  # Plot the pruned tree
+  rpart.plot(pruned_tree, main = paste(oversampling_names[i], "DT (Pruned)"), box.palette="orange", cex = 0.7, extra = 104, under = TRUE, fallen.leaves = TRUE)
+}
+
+```
+The results of the plot show that all of the oversampling and initial model split the data based on the Country.of.Origin. When observing the models of the oversampling and SMOTE, we can 
+
+## Evaluating Decision Tree Metrics
+
+After building the decision tree let us evaluate the different performance of the different models that have been built. We will see how the accuracy changes from the imbalanced data to the different oversampling techniques. We will look at the Accuracy of the model the Precision, Recall and the the F1 score as a way to see the evaluate the performance. We will evaluate the AUC performance of the different classes and the the different over sampling techniques that were used when training the model. Finally, the variable importance of the algorithm will be assessed and see if we can draw any insights from the results. 
+
+### Computing Metrics for Decision Tree
+
+
+```{r}
+predictions_pruned_dt <- list(predictions_pruned_initial, predictions_pruned_over, predictions_pruned_smote, predictions_pruned_rose)
+
+results_dt <- evaluate_all_models(predictions_pruned_dt, test_data$Grade, oversampling_names)
+results_dt
+```
+
+The initial model shows an accuracy at 84% with a Kappa statistics of approximately 0.13 which is low. The are good is classifying very good quality but do not perform well on Excellent and Commodity. We know that the initial model is imbalanced and the accuracy is inflated. The over sampled model shows that classifies Commodity and Excellent compared to initial model and the performance of classifying very good drops, except for the ROSE where it has difficulty with classifying Commodity grade. The Kappa statistics is higher at around 0.18 showing a better balance between classes. The SMOTE technique shows that the decision tree has a better accuracy of 67% with a Kappa statistics of 0.15. Both the over sampled techniques and the SMOTE technique improve the classification of Commodity and excellent when compared to the initial and rose model but they do not do as well in classifying the very good class. Lastly, the ROSE model has a higher accuracy with a higher Kappa statistics that is around 0.179, but its is important to note that the models has diffulty with Commodity. 
+
+
+### Plotting Results 
+
+```{r}
+# Create the plots
+macro_plot_dt <- plot_model_evaluation_macro(evaluate_all_models(predictions_pruned_dt, test_data$Grade, oversampling_names), rep("Decision Tree", 2))
+macro_plot_dt
+```
+Now we will be plotting the results from the accuracy and the Kappa statistics.  
+
+```{r}
+accuracy_kappa_dt <- plot_model_evaluation_accuracy_kappa(evaluate_all_models(predictions_pruned_dt, test_data$Grade, oversampling_names), rep("Decision Tree", 5))
+accuracy_kappa_dt
+```
+
+
+### Evaluating Performance AUC for Decision Tree
+
+In this section we will be calculating the AUC performance of the different oversampling techniques that we used in the training data. We use one-vs-rest approach calculating the AUC of each factor level of the target variable. For instance if we evaluate Excellent vs the rest we treat Excellent as the positive class and treat all the other class as the negative class. 
+```{r}
+auc_dt <- calculate_multiclass_auc(model_dt, oversampling_names, test_data)
+
+print(auc_dt)
+
+```
+
+The decision tree that have no oversampling (Initial) and ROSE have AUC values for all classes are relatively low, indicating that their performance in distinguishing between classes is not very strong. The excellent class in both of them has the highest AUC, followed by commodity and very good. This suggests that the model is most effective at distinguishing the excellent class from the rest.
+
+When assessing the AUC values for over sampled and SMOTE trained models we can see that the performance measure of the AUC values has improved for all classes compared to both of the previous models. The excellent grade has the highest AUC followed by very good then commodity. This tells us that the decision tree trained on a over data that has been over sampled can improve the performance for classifying all of the quality of the coffee quality. 
+
+As for the SMOTE, commodity and excellent classification has improved and the AUC for the class very good has dropped significantly suggesting SMOTE may not be effective for the class. Overall the SMOTE performs very well for both of the classes where as the oversampling performs better for the very good class when considering a decision tree. 
+
+
+```{r}
+colors <- c("red", "blue", "green")
+plot_multiclass_auc(model_dt, oversampling_names, rep("Decision Tree", 5), test_data, colors)
+```
+
+The training that is used to with the imbalance data shows that the model has moderate ability to distinguish between classes. The model trained on the data set that has under went the ROSE oversampling technique performs worse in terms of mean AUC.  The over sampled model and the SMOTE techniques have a higher value than the initial and the ROSE techniques. The model with the over technique's mean AUC is approximately 0.699 and the mean AUC of the SMOTE is 0.682.When inspecting these two models we can see that the AUC for the Excellent vs the rest is high for the data that is similar for both the model trained on SMOTE and Over. 
+
+### Confusion Matrix for Descision Tree
+
+
+```{r}
+plot_confusion_matrix(predictions_pruned_dt, oversampling_names, rep("Decision Tree", 4), test_data)
+```
+
+For the model data that is trained with no oversampling it did not make any correct prediction for Commodity and it also did not not incorrectly predict any other class as Commodity. The Excellent is classified correctly for 5 instances and predicts 8 instances to be Excellent while they were actually Very Good. The model performs well on very good with 268 instances correctly classified. The decision tree for the imbalanced data seems to perform very well on the majority class as is expected. The overall performance seems less than ideal as it struggles with the minority classes of excellent and commodity.
+
+Evaluating the confusion matrix for training data that use the over sampling method we can see that the Commodity class is correctly predicted with 15 instances and 8 instances incorrectly classified as Very Good and one instance being incorrectly classified as Excellent. Moreover the model using the same sampling techniques correctly predicts 157 instances of the Very Good class but fails to predict 82 instances of the same class to be Commodity and 37 to be Excellent. Lastly the model classifies correctly 15 instances that are Excellent class and 6 incorrect instance by classifying them Very Good and 1 instance classified as Commodity while it was Excellent.
+
+Inspecting the confusion matrix of the decision tree that is used with the SMOTE oversampling technique we can see that the Commodity class has 10 instances that are correctly predicted and 14 instance incorrectly classified as Very Good. Very Good instances that are correctly classified as 198 and 40 is incorrectly classified as Commodity and 38 is wrongly classified as Excellent. Then we can see Excellent class is classified correctly with 9 instances and incorrectly classified as very good with 13 instances. The algorithm seem to have difficulty struggles with very good and Commodity classes. 
+
+Lastly, when inspecting the ROSE trained model we can see that it is correctly classifies 262 instances that are Very Good and incorrectly predicts 14 instances as Excellent. Furthermore, is classifies 8 instances as Excellent and miss classifies one instances as Commodity and 13 instances as Very Good. For Commodity it correctly classified zero instances and got all 24 instances wrong by miss classify them as Very Good. 
+
+All of the techniques used and the imbalance trained models seem to be accurate when predicting the Very Good class but struggle with Commodity and Excellent classes. In addition the over sampling and the SMOTE techniques seem to have difficulty distinguishing between Very Good and Commodity. 
+
+### Variable Importance for Decision Tree
+
+```{r}
+create_varImp_df <- function(all_models, model_names) {
+  # Calculate variable importance for the first model
+  var_imp <- varImp(all_models[[1]], scale = FALSE)
+  
+  # Convert to a data frame
+  varImp_df <- data.frame(Variable = rownames(var_imp), var_imp[, 1])
+  colnames(varImp_df) <- c("Variable", model_names[1])
+  
+  # Loop over the rest of the models
+  for (i in 2:length(all_models)) {
+    # Calculate variable importance
+    var_imp <- varImp(all_models[[i]], scale = FALSE)
+    
+    # Convert to a data frame
+    varImp_df_i <- data.frame(Variable = rownames(var_imp), var_imp[, 1])
+    colnames(varImp_df_i) <- c("Variable", model_names[i])
+    
+    # Merge with the existing data frame
+    varImp_df <- merge(varImp_df, varImp_df_i, by = "Variable")
+  }
+  
+  # Return the variable importance data frame
+  return(varImp_df)
+}
+
+variable_importance_dt<- create_varImp_df(model_dt, oversampling_names)
+print(variable_importance_dt)
+```
+
+The first things that jumps out is that the data that is not over sampled and the ROSE model that are run on the decision tree are the same. Where as the ones that run on decision tree and over sampled using over sampling and SMOTE have increased almost all across the board except for Quakers. Variables like altitude, country and partners are important in the over sampled data set and SMOTE treated trained models compared to the Initial and ROSE models,
+
+```{r}
+plot_varImp_df <- function(varImp_df, algorithms) {
+  # Initialize a list to store the plots
+  plot_list <- list()
+  
+  # Loop over the columns of varImp_df (excluding the first column which is 'Variable')
+  for(i in 2:ncol(varImp_df)) {
+    # Create a data frame for the current model
+    df <- data.frame(Variable = varImp_df$Variable, Importance = varImp_df[,i])
+    
+    
+  # Create a ggplot of the variable importance
+        p <- ggplot(df, aes(x = reorder(Variable, Importance) , y = Importance)) +
+                  geom_col(fill = "orange") +
+                  theme_minimal() + 
+                  labs(x = "Variable", y = "Importance",
+                title = paste("Variable Importance for", colnames(varImp_df)[i], "Model (Algorithm:", algorithms[i], ")")) + 
+                coord_flip()
+        
+              
+    
+    # Add the plot to the list of plots
+    plot_list[[i-1]] <- p
+  }
+  
+  # Arrange the plots in a 2x2 grid
+  grid.arrange(grobs = plot_list, ncol = 2)
+}
+
+
+plot_varImp_df(variable_importance_dt, rep("Decision Tree", 5))
+```
+
+
+# Random Forest 
+
+```{r}
+
+control <- caret::trainControl(method="cv", number=10)
+
+# Define the tuning grid
+grid <- expand.grid(.mtry=c(1:3))
+
+# Train the model
+model_initial_rf <- caret::train(formula, data=train_data, method="rf", trControl= control, tuneGrid=grid)
+model_over_rf <- caret::train(formula, data = over_train, methods = "rf", trControl = control, tuneGrid = grid)
+model_smote_rf <- caret::train(formula, data = smote_train, methods = "rf", trControl = control, tuneGrid = grid)
+model_rose_rf <- caret::train(formula, data = rose_train, methods = "rf", trControl = control,  tuneGrid = grid)
+```
+
+When building the random forest model we have taken an approach that allows us to tune the parameter of the number of predictors will be used in each split on the different training data using the oversampling techniques. As per usual the first model is created using the imbalanced data and the rest are the same as our decision tree over sampling techniques. We also use a 10-cross validation for estimating model and a grid search for the mtry parameter which is the number of predictors will best when splitting. Since we did not specify the metric by default the mtry is evaluated on the accuracy and the Kappa statistics of the model. Let us see what the mtry parameters are from training the model.
+
+```{r}
+get_mtry_values <- function(models, model_names) {
+  # Initialize an empty vector for mtry values
+  mtry_values <- c()
+  
+  # Iterate over the models
+  for(i in 1:length(models)) {
+    # Append the mtry value of the current model to the mtry_values vector
+    mtry_values <- c(mtry_values, models[[i]]$bestTune$mtry)
+  }
+  
+  # Create a data frame with model names and mtry values
+  df <- data.frame(Model = unlist(model_names), Mtry = mtry_values)
+  
+  return(df)
+}
+model_rf <- list(model_initial_rf, model_over_rf, model_smote_rf, model_rose_rf)
+get_mtry_values(model_rf, oversampling_names)
+```
+
+For the model that is trained with the data has not undergone oversampling technique and have underwent oversampling technique the number of mtry is 3 which means that the best accuracy and Kappa statistics is obtained with 3 variables in each split, which the square root of all the predictors.   
+
+```{r}
+
+model_initial_rf_tuned <- randomForest(formula, train_data, mtry = 3, ntrees = 1000)
+model_over_rf_tuned <- randomForest(formula, over_train, mtry = 3, ntrees = 1000 )
+model_smote_rf_tuned <- randomForest(formula, smote_train, mtry = 3, ntrees = 1000)
+model_rose_rf_tuned <- randomForest(formula, rose_train, mtry = 3, ntrees = 1000)
+
+
+
+```
+
+We build the random forest based on the formula that includes the objective parameters and the target variable Grade, we specify the mtry parameter based on the tuned cross-validated trained value and also specify the number of tree in the forest which we set to 1000 for all the models to get a balanced computational efficiency. Predicting and evaluating the model will be done in the preceding stages. 
+
+```{r}
+predict_initial_rf_tuned <- predict(model_initial_rf_tuned, test_data)
+predict_over_rf_tuned <- predict(model_over_rf_tuned, test_data)
+predict_smote_rf_tuned <- predict(model_smote_rf_tuned, test_data)
+predict_rose_rf_tuned <- predict(model_rose_rf_tuned, test_data)
+```
+
+## Evaluating Random Forest 
+
+We have constructed the Random Forest model based on the tuned parameter of mtry and we have made prediction based on the model that is built for each oversampling techniques. Now we will evaluate the performance in terms of metrics, specifically Accuracy, Precision Recall and F1 score. We will also see the AUC performance, the confusion matrix and the important variables. We will compare how the different oversampling techniques perform and what insight we can gain in accurately preidting the quality of the coffee grade. 
+
+### Computing Metrics for Random Forest
+
+```{r}
+
+
+predictions_rf_tuned <- list(predict_initial_rf_tuned, predict_over_rf_tuned, predict_smote_rf_tuned, predict_rose_rf_tuned)
+results_rf <-evaluate_all_models(predictions_rf_tuned, test_data$Grade,oversampling_names)
+
+results_rf
+
+```
+
+The results of the initial model which is trained on an imbalanced data has an accuracy level of 85.68% and Kappa of 0.23. It is worth noting that the accuracy could be well inflated because the data is trained on an imbalanced data set. We will be just using it as a comparison with the rest. Because the data set is imbalanced and model tends to favor majority classes we cans see that the recall for both Commodity and Excellent is low indicating that it struggles to identify these class. 
+
+When we check for the Over which uses random sampling of synthetic with replacement we can see that the accuracy does slightly drop to 79% and might not be inflated because the data set that is used for the training is balanced. The Kappa value decreases to 0.22 which is almost the same.  We can also see that the recall for the Commodity and Excellent is higher than the previous result. We can thus say that the oversampling helps in the classification of the minority classes. 
+
+When we have utilized the SMOTE data on the model, the accuracy drops to approximately 70%. The Kappa decreases when compared to the the two previous models to 0.11. Lastly looking at the data that uses ROSE on the model, the accuracy improves to 80% with the model being able to classify Commodity and Excellent better than the model that is trained on the imbalanced data set but better than the SMOTE. The Kappa level is 0.20 does increase when compared to the model that is trained on the SMOTE data set. 
+
+### Plotting Results 
+
+```{r}
+# Create the plots
+macro_plot_rf <- plot_model_evaluation_macro(evaluate_all_models(predictions_rf_tuned, test_data$Grade, oversampling_names), rep("Random Forest", 2))
+macro_plot_rf
+```
+```{r}
+accuracy_kappa_rf <- plot_model_evaluation_accuracy_kappa(evaluate_all_models(predictions_rf_tuned, test_data$Grade, oversampling_names), rep("Random Forest", 5))
+accuracy_kappa_rf
+```
+
+
+
+### Evaluating Performance AUC Random Forest 
+
+```{r}
+
+model_rf_tuned <- list(model_initial_rf_tuned, model_over_rf_tuned, model_smote_rf_tuned, model_rose_rf_tuned)
+
+auc_rf <- calculate_multiclass_auc(model_rf_tuned, oversampling_names, test_data)
+print(auc_rf)
+
+
+```
+
+When evaluating how well the different oversampling techniques trained on random forest are able to distinguish between classes we will be use the AUC performance. The initial and the ROSE technique model with no oversampling is able to distinguish excellent vs the rest better than when compared to the rest. In the over sampled technique the model performance of the AUC tells us it is able to distinguish commodity and excellent better than very good class. Where as the SMOTE shows a large drop in distinguishing between classes especially for the commodity and very good when compared to the rest of the model.
+
+
+```{r}
+
+plot_multiclass_auc(model_rf_tuned, oversampling_names, rep("Random Forest", 5), test_data, colors)
+
+```
+
+When evaluating the mean AUC scores for each of the imbalance and over sampled trained technique on random forest we can see that the model trained on the imbalance data set, the over sampled techniques and the ROSE do a fair good job at distinguishing between classes. Where as the SMOTE over sampled trained random forest is significantly lower than the other models. Its ability to classify Commodity and Very Good from the rest is lower than the rest of the results. 
+
+
+### Confusion Matrix for Random Forest
+
+```{r}
+plot_confusion_matrix(predictions_rf_tuned, oversampling_names, rep("Random Forest", 5), test_data)
+```
+
+When we briefly inspect the confusion matrix of the imbalanced data set and the different data set that use oversampling techniques we can see that the models do a an Excellent job in classifying Very Good than the remaining classes. The data that is trained on the initial data set with no techniques classifies the Very Good class very well while performing poor on Commodity and Very Good, with only 4 and 6 correct classification and a total of 20 and 16 incorrect classification respectively. 
+
+Then when inspecting the SMOTE we can see that the correct identification for the Very Good class does tend to decrease with a total of 39 miss classification. But the correct classification for the Commodity and Excellent increases to 9 and 7 of correct classification, respectively and a decrease of miss classification of 15 for both. 
+
+For the data set that has been treated using the SMOTE analysis we can see that there is a correct classification for the Very Good of 217 with a total of 59 incorrect classification. The performance with the incorrect classification and correct classification is the same as the one that has been treated with the random oversampling of minority classes with replacement (Over). However, we should note that there is an instance that an coffee graded as Excellent has been predicted to be a Commodity, and this is a grave mistake. 
+
+Lastly, looking at the model that uses the ROSE data set we can see that the ere are 245 instances that have been correctly classified as Very Good with a total of 28 instances being incorrectly predicted. In this case we can see the correctly predicted number of Commodity and Excellent are 5 and 8, respectively. Where as the incorrect classification are 19 and 14 respectively. 
+
+
+### Variable Importance Random Forest
+
+
+```{r}
+variable_importance_rf <- create_varImp_df(model_rf_tuned, oversampling_names)
+print(variable_importance_rf)
+```
+Inspecting the numerical aspect of variable importance which measures how much a model depends on a particular variable for prediction, we can see the model build on the initial training data has a lower score across the board when compared to the over sampled training data using various techniques. For instance, for the SMOTE we can see that the altitude has the highest importance, where as for the ROSE it is category one defects in its log form and the over sampling technique it is country of origin. 
+
+
+```{r}
+plot_varImp_df(variable_importance_rf, rep("Random Forest", 5))
+```

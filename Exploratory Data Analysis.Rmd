@@ -1,0 +1,1170 @@
+---
+title: "Cleaning and Exploratory Data Analysis"
+output: html_document
+date: "2023-12-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading Packages 
+This section will load all of the libraries that are required to conduct the data analysis of our dataset. 
+```{r, message = FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(psych)
+library(patchwork)
+library(naniar)
+library(cowplot)
+library(caret)
+library(patchwork)
+library(forcats)
+library(ggrepel)
+library(naniar)
+library(rpart)
+library(caret)
+library(caTools)
+library(party)
+library(magrittr)
+library(e1071)
+library(ROSE)
+library(caret)
+library(psych)
+library(cowplot)
+library(GGally)
+```
+
+
+```{r}
+knitr::opts_chunk$set(fig.width=20, fig.height=15) 
+
+```
+
+# Loading Data set
+
+```{r}
+url <- "https://raw.githubusercontent.com/jldbc/coffee-quality-database/master/data/arabica_data_cleaned.csv"
+
+coffee <- read.csv(url)
+```
+Using the [URL]("https://raw.githubusercontent.com/jldbc/coffee-quality-database/master/data/arabica_data_cleaned.csv") the data set is loaded and stored as the variable name
+url. 
+
+```{r}
+str(coffee)
+```
+Our dataset consists of only Arabica coffee species. The features that are included in the data set are :
+
+
+1.   X : Index column
+2.   Species: Inidctaes whether the coffee is Arabica or Robusta. Since we have restricted our dataset to only Arabica, this column contains only Arabica.
+3.   Owner : This is the owner of the coffee bean. It indictes the farmer name, the cooperative or the company that is owned. In this data set this is a feauture that has been transfromed into lower case from the Owner.1 column.
+4.   Country of Origin : The country of the coffee name.
+3.   Farm Name : Specifies the name of the farm where the coffee is produced.
+4.   Lot Number : The name of the farmer who delivered the coffee to the mill and other specific details about the coffee, which establishes a chain of custody.
+5.   Mill : The mill indicates where the coffee cherries are processed to become green beans.
+6.   ICO Number : A document certified by the customs authorities of an importing Member country to cover the importation of coffee not accompanied by a valid Certificate of Origin.
+7.   Company : The name of the company that has acquired the coffee.
+8.   Altitude : Range of the altitude of of the farm.
+9.   Region : The specific region within the country of orgin where the coffee is produced.
+10.  Producer: This data represents the commercial or name of farmers that have produced the green bean.
+11.  Number of Bags : The number of bags that is harvest for the specific bean.
+12.  Bag Weight : Inidcates the bag of weight the coffee bean was prepared in.
+13.  In Country Partner : Partner of the country of origin.
+14.  Harvest Year : The year that the coffee was harvested.
+15.  Grading Date : The datae the coffee was reviewed.
+16.  Owner 1 : The original data of the owner's of coffee without being processed.
+17.  Variety : Further divided into multiple varieties and different coffees taste completely different based on the growth conditions of the coffee.
+18.  Processing Method: This will identify whether the green bean was wahsed, natural/dry or semi washed.
+19.  Aroma : Smell of dry coffee, wet coffee at crust break and wet coffee as it steeps.
+20.  Flavor : Mid-range notes between first impression and aftertaste. Intensity, quality an complexity.
+21.  Aftertaste: Length and quality of enjoyable flavor after the coffee is swallowed.
+22.  Acidity : Brightness (Good) and Sour (Bad). (Scale 1-10)
+23.  Body : Tactile feeling between the tongue and mouth. (Scale 1-10)
+24.  Balance : Balance of flavor, aftertaste, acidity and body. (Scale 1-10)
+25.  Uniformity : Consistency of flavor accross cups. (Scale 1-10)
+26.  Clean Cup: Lacking negative tastes from begining to end of taste. (Scale 1-10)
+27.  Sweetness : Sugar flavor (Good) and Astigency flavors (Bad) (Scale 1-10)
+28.  Cupper Points : Holistic score by cupper. (Scale 1-10)
+29.  Total Cup Points : Total of the 10 metrics mentioned above. (Scale 1-100)
+30.  Moisture : The moisture percentage from the green bean.
+31.  Category One Defect : This feature indicates the major defects in the beans. In the dataset the value ranges from 0 to 55.
+32.  Quakers : These are coffees that do not turn dark when rosted.
+33. Color: This represents the color of the green bean whether it is green, blueish green or blue green.
+34.  Category Two Defects: Minor defects on the beans. In this dataset the values range from 0 to 55.
+35.  Expiration : Indicates the expiration of the certification of the beans.
+36.  Certification Body : Institute of individual with authority to certify grading of the coffee.
+37.  Certification Address : The institute or individual of where the coffee is certified.
+38.  Certifcation Contact : The person overlooking the certification.
+39.  unit_of_measurement : Unit of measurement for the altitude of the farm. Expressed in meters or feet.
+40.  altitude_low_meters : Lowest altitude recorded in the Altitude feature and converted into meters.  
+41.  altitude_high_meters : Highest altitude recorded in the Altitude feature and converted into meters.
+42.  altitude_mean_meters : Altitude of the farm. This value is calculated by taking the average of the Altitude feauture and converted in to meteres for those that are in expressed in feet.
+
+
+
+
+In the next following section, we will clean the data based on the various issues we had encountered during the preliminary exploratory data analysis. The following processes will be implemented in order to prepare the data set for the appropriate analysis: 
+
+
+* Simple cleaning up of data(index dropping, empty spaces and duplicates in the data)
+* Creating a new variable called Grade,
+* Removing the value 0 in Total.Cup.Points,
+* Handling all the discrepancies in the altitude_mean_meters variable data entry based unit measurement and different entry methods used,
+* Variable such as Bag.Weight is recorded in characters,
+* Creating a new variable that combines Bag.Weight and Number.of.Bags to create Total.Weight,
+* Selecting important variables for the analysis and dropping values that are not required
+* Convert the variables stored in characters to factors.
+* Dropped an non-plausible value for altitude. 
+* Log transformed Total.Weight, Category.One.Defects and Category.Two.Defects. 
+
+  
+## Checking Structure and Preliminary Cleaning 
+
+```{r}
+glimpse(coffee)
+```
+We will drop the index column. We can also see that some of the values are are stored as "" or " " so it is best to convert them into NAs. 
+
+```{r}
+# Drop the index in the data set
+coffee <- coffee[, -1]
+
+## Remove empty spaces and replace with NA
+coffee[coffee == ""] <- NA
+coffee[coffee == " "] <- NA
+```
+
+We will also make sure that there are no duplicates by using the distinct function. 
+
+```{r}
+coffee <- distinct(coffee)
+```
+
+In the following section 
+
+### Total Cup Point and Grade
+
+During the preliminary exploratory data analysis a value of 0 in the Total.Cup.Point was skewing the variable.
+
+```{r}
+glimpse(coffee[coffee$Total.Cup.Points == 0, ])
+```
+
+Total.Cup.Points is a summation of Aroma, Flavor, Aftertaste, Acidity, Body, Balance, Uniformity, Clean.Cup, Sweetness and Cupper.Points. When inspecting the observation it is evident that the data that is used to calculate it are also zero. Thus it would be important to remove the value.
+
+```{r}
+coffee <- coffee[coffee$Total.Cup.Points != 0, , drop = FALSE]
+```
+
+Using the Q-Grading standards, this conversion method the Total.Cup.Points will be converted to four different categories:  "Commodity," "Very Good," "Excellent," and the esteemed "Outstanding." For further clarification on how the process is undertaken and why we have chosen these values [click here](https://spiritanimalcoffee.com/blogs/spirit-animal-blog/the-coffee-quality-score#:~:text=To%20master%20the%20SCAA%20cupping,specialty%20coffee%E2%80%9D%20badge%20of%20honor) 
+
+The classification process uses a cutoff point of 79 to distinguish "Commodity" grade coffees, meaning those that score lower or are not considered specialty coffee. "Very Good" covers a range of excellent coffees, from 80 to 84.99, and "Excellent" covers a range of 85 to 90, indicating very good qualities. Anything above 90 is classified as "Outstanding". This enable us to understand the distribution of coffee grades and helps stakeholders identify the differences in quality.
+
+```{r}
+# Conditions for the corresponding labels 
+conditions <- c(-Inf, 79, 84.99, 90, Inf)  
+new_labels <- c("Commodity", "Very Good", "Excellent", "Outstanding")
+
+# The column Grade will be based on the condition
+coffee$Grade <- cut(coffee$Total.Cup.Points, breaks = conditions, labels = new_labels, right = TRUE)
+```
+
+### Altitude Mean Meters 
+
+During the preliminary stages of our exploratory data analysis, a careful review of the data set revealed discrepancies concerning the "altitude_mean_meters" variable. The main difference was that some entries were registered in feet, which introduced inconsistencies. Extensive examination, involving cross-referencing with the unprocessed data set, revealed that these entries were initially registered in feet(ft) instead of undergoing conversion before being registered in altitude_mean_meters.
+
+Moreover, patterns of observation from Brazil and Myanmar were noticed. For example records in Myanmar that were handled by the Coffee Quality Institute were recorded in feet. But they were not appropriately converted before being registered in the altitude_mean_meter column. Furthermore, records from Brazil were recorded as 1 for 1000 meters and 1.2 for 1200 meters. Cross-referencing with the original data set and other resources a correction step was undertaken. 
+
+In other instances, when the conversion from the variable Altitude to the altitude_mean_meters was conducted the values were stripped off the decimal point and recorded as 12 in the altitude_mean_meters process.These values were multiplied by 100 to get the correct value. As a result, the purpose of this phase is to address and resolve these found discrepancies, guaranteeing a more accurate and robust analysis.
+```{r}
+# Make a copy of the variable and keep in the column altitude_mean_meters_new
+coffee$altitude_mean_meters_new = coffee$altitude_mean_meters
+```
+We create a copy of a altitude_mean_meters in order to compare and understand where the discrepancies have occurred. Then we will make changes to the new variable altitude_mean_meters_new for the exploratory and analytic purposes. It is important to remember that altitude_mean_meters is a derivation of the altitude_high_meters and altitude_low_meters. These variables are all derived from the column Altitude which was recorded in a hyphenated to depict the range, recorded in feet or recorded abbreviation such as 1.2 for 1200 meters.The column is not consistent and the will be cleaned in this section.
+```{r}
+# There was an error in registering the value 190164 by missing a decimal
+print(subset(coffee, altitude_mean_meters ==  190164, select = c("altitude_mean_meters", "Altitude", "Country.of.Origin","Owner")))
+
+# Correction of error      
+coffee$altitude_mean_meters_new = ifelse(coffee$altitude_mean_meters_new == 190164, 1901.64, coffee$altitude_mean_meters_new)
+```
+We can see that one of the values was properly recorded in the Altitude column, where as the other one was not. But when the values was being processed into the altitude_mean_meters we can see that an error occurred for at least one of them. Furthermore we inspected the region and that saw the altitude was not 190164. So this is corrected in the column altitude_mean_meters_new. 
+```{r}
+# Create a function to convert the instances where coffee is registered in feet to meters
+feet_to_meters <- function(feet) {
+  conversion_factor <- 0.3048
+  meters <- feet * conversion_factor
+  return(meters)
+
+}
+
+# Altitude that was registered by the Coffee Quality Institution and the Country of origin was Myanmar were recorded in feet
+condition_1 = coffee$In.Country.Partner == "Coffee Quality Institute"
+condition_2 = coffee$Country.of.Origin == "Myanmar"
+print(subset(coffee, condition_1 & condition_2, select = c("altitude_mean_meters", "Altitude", "In.Country.Partner")))
+```
+As mentioned earlier, the observations that were composed of the country Myanmar and the Coffee Quality Institute the Altitude was recorded in feet and was stored in altitude_mean_meters column without conversion. In this step we will convert them to feet using the function created above. 
+
+```{r}
+# Using the condition to convert from feet to meters 
+coffee$altitude_mean_meters_new[condition_1 & condition_2] = feet_to_meters(coffee$altitude_mean_meters_new[condition_1 & condition_2])
+```
+We have used the condition specified as Myanmar and Coffee Quality Institute to convert these values into the appropriate units. 
+
+```{r}
+# Checking the rows
+print(coffee[c(216, 838, 1002, 1270), c("Altitude", "altitude_mean_meters", "In.Country.Partner", "Country.of.Origin")])
+```
+The following rows are also recorded in feet but did not go the apropriate conversion. 
+```{r}
+# Converting the values to feet
+rows_to_update <- c(216, 838, 1002, 1270)
+coffee$altitude_mean_meters_new[rows_to_update] <- feet_to_meters(coffee$altitude_mean_meters_new[rows_to_update])
+```
+When inspecting the the data set we saw that Guatemala recorded their Altitude in both feet and meters, although most went the appropriate conversion, there were these few that remained.
+```{r}
+# These rows had some errors when recording the altitude_mean_meter column
+print(coffee[c(544, 629, 1041,1204), c("Altitude", "altitude_mean_meters")])
+```
+
+These values are recorded in meters but there was decimals not being handled appropriately during the conversion stage and one was a data entry error which is associated to the region of cerrados. We know from the data and other resources that the value 11000 is not plausible, and thus conclude that this is a data entry error and correct the value appropriately. 
+
+```{r}
+# Correction of data entry and conversion errors
+coffee$altitude_mean_meters_new[c(544, 629, 1041, 1204)] <- c(1100, 1800, 1100, 1200)
+```
+We have inputted the correct values and fixed and error that was prevalent. 
+
+```{r}
+# The following rows were identified 
+print(coffee[c(482, 280, 614, 684, 738, 762, 781,  839, 840, 878, 964), c("Altitude", "altitude_mean_meters", "Country.of.Origin", "Region")])
+```
+Recorded as 1 to represent 1000 meters all of the values are from Brazil of the south minas region. From resources we know from the data and other resources that south of minas has an average altitude of 950m. 
+```{r}
+# We will be storing the rows to be updated and multiply the values by 1000
+rows_to_update = c(482, 280, 614, 684, 738, 762, 781,  839, 840, 878, 964)
+coffee$altitude_mean_meters_new[rows_to_update] = coffee$altitude_mean_meters_new[rows_to_update] * 1000
+
+```
+We have thus multipled the values with 1000 to convert the single digit recordings into the meters. 
+```{r}
+# The following rows were converted from 1.2 which represent 1200 meters to 12 
+# when cleaning the data
+ print(coffee[c(42, 43, 786, 899), c("Altitude", "altitude_mean_meters", "Country.of.Origin", "Region")])
+```
+We can see from the result that when the Altitude column was recorded as an abbreviation and thus when the conversion process was conducted it stored these values by removing the decimal point. We will multiply them with 100 and get the appropriate value in terms of meters. 
+```{r}
+rows_to_update_2 = c(42, 43, 786, 899)
+coffee$altitude_mean_meters_new[rows_to_update_2] = coffee$altitude_mean_meters_new[rows_to_update_2] * 100
+
+```
+Now that we have finished handling the altitude_mean_meters and stored all the conversions and error correction into our new column altitude_mean_meters_new column. We will be using this variable for the exploration and analysis of the data. 
+
+### Bag.Weight 
+
+```{r}
+class(coffee$Bag.Weight)
+unique(coffee$Bag.Weight)
+```
+We can see that bag weight is stored as a character with different measurements, thus it is important to convert this into numeric and the same unit measurement. We have used the metric standard and we will  convert all of the values that are in pound(lbs) to kilogram(kg) and round them two decimal places. Let us create a new column with all the values in the Bag.Weight column and then change them to numeric and store it as Num.Bag.Weight.
+
+```{r}
+# We will create a new variable called Num.Bag.Weight to convert the characters to numeric value.
+coffee$Num.Bag.Weight = coffee$Bag.Weight
+```
+Since we know that the value in Bag.Weight is stored in kg or lbs we will be converting the lbs to kg.
+
+```{r}
+#Treating the Bag.Weight variable by converting its lbs value to kg and then to numeric
+# Identify values in pounds
+is_lbs <- grepl(" lbs", coffee$Num.Bag.Weight)
+# Identify values in kg
+is_kg <-grepl(" kg", coffee$Num.Bag.Weight)
+# Remove " lbs" from variable
+coffee$Num.Bag.Weight[is_lbs] <- gsub(" lbs", "", coffee$Num.Bag.Weight[is_lbs])
+# Remove " kg" from variable
+coffee$Num.Bag.Weight[is_kg] <- gsub(" kg", "", coffee$Num.Bag.Weight[is_kg])
+# Convert pound values to kg and store them back as numeric value
+coffee$Num.Bag.Weight[is_lbs] <- as.numeric(coffee$Num.Bag.Weight[is_lbs]) * 0.45359237
+# Convert kg values to numeric
+coffee$Num.Bag.Weight[is_kg] <- as.numeric(coffee$Num.Bag.Weight[is_kg])
+# Round the values to decimal places
+coffee$Num.Bag.Weight <- round(as.numeric(coffee$Num.Bag.Weight), 2)
+```
+
+### Total Weight
+
+Recognizing that there is a relationship between number of bags and bag weight, we can combine these two values in order to give us the number of weight that is sampled. This could help us reduce redundancy and inspect if there is a relationship between the quantity sample and the quality of coffee.
+```{r}
+coffee$Total.Weight = (coffee$Num.Bag.Weight * coffee$Number.of.Bags)
+```
+
+### Reordering, Subsetting and Factor Conversion
+
+```{r}
+coffee_clean <- dplyr::select(coffee, Grade, Total.Cup.Points, Aroma, Flavor, Aftertaste, Acidity, Body, Balance, Uniformity, Clean.Cup,
+Sweetness, Cupper.Points, Category.One.Defects,Category.Two.Defects, Quakers, Moisture, altitude_mean_meters_new, Total.Weight, Variety, Color, Processing.Method, Country.of.Origin, In.Country.Partner)
+```
+
+This will be the data set that will be used for further exploration and data analysis. We will use the variables we created such as Grade and Total.Weight. Also we will include the variables that went the corrective process such as altitude_mean_meters_new. 
+```{r}
+glimpse(coffee_clean)
+```
+Let us examine which values has the most missing values and if we can conduct any simple methods of handling this instances. We will use a simple proportion count using. 
+```{r}
+# Creating a function that ingests the data set and gives us a summary of the missing  values. It will calculate the Count and the Percentage and arrange it in descending  order
+missing_values_summary <- function(data) {
+  data %>%
+    gather(key = "Variables", value = "Values") %>%
+    group_by(Variables) %>%
+    summarise(
+      Count = sum(is.na(Values)),
+      Percentage = mean(is.na(Values)) * 100
+    ) %>%
+    arrange(desc(Percentage))
+}
+
+
+missing_values_summary(coffee_clean)
+```
+The column altitude_mean_meters has the highest level of missing values followed by Color, Variety and Processing Method. For now we will only handle the categorical variables by replacing the missing values with the factor "Unknown". 
+
+```{r}
+# Replace the missing categorical NAs with "Unknown"
+coffee_clean <- coffee_clean %>%
+  mutate(
+    Color = coalesce(Color, "Unknown"),
+    Variety = coalesce(Variety, "Unknown"),
+    Processing.Method = coalesce(Processing.Method, "Unknown"),
+    
+  )
+
+vis_miss(coffee_clean)
+
+```
+We found one instance where the Country of Origin is missing Region is there so we will be substituting this variable withe the correct Country of Origin.
+```{r}
+head(coffee[is.na(coffee$Country.of.Origin), ])
+
+coffee_clean$Country.of.Origin <- ifelse(is.na(coffee_clean$Country.of.Origin), "Colombia",coffee_clean$Country.of.Origin)
+```
+
+The variables Variety, Color, Processing.Methods, Country.of.Origin and In.Country.Partner are stored as character and should be converted to factor.
+```{r}
+convert_characters_to_factors <- function(data) {
+  # Identify character columns
+  char_cols <- sapply(data, is.character)
+
+  # Convert character columns to factors
+  data[char_cols] <- lapply(data[char_cols], as.factor)
+
+  # Return the modified data frame
+  return(data)
+}
+
+coffee_clean <- convert_characters_to_factors(coffee_clean)
+
+glimpse(coffee_clean)
+```
+
+# Exploratory Data Analysis
+
+## Target Variables (Grade and Total.Cup.Points)
+
+Evaluating Total.Cup.Points we will use the describe function in order to understand the summary of the data set in terms of mean, median, its skeweness and kurtosis. In addition, we will use a function to combined plots of a density, histogram and a box plot to get a visual understanding of how our target variable is composed.
+```{r}
+# Create a function that enables you to plot a density, histogram, and a box plot. This will be predominantly used for the numerical variables. 
+plot_combined_stats <- function(data, variable, bins = 30) {
+
+  # Create the density plot
+  density_plot <- ggplot(data, aes(x = .data[[variable]])) +
+    geom_density(fill = "orange", alpha = 0.6) +
+    stat_function(fun = dnorm, args = list(mean = mean(data[[variable]]), sd = sd(data[[variable]])),
+                  color = "blue", linetype = "dashed") +  
+    theme_minimal() +
+    labs(x = variable, y = "Density") +
+    theme(
+      axis.title.y = element_text(vjust = 0.5, hjust = -0.2, angle = 0),
+      axis.title.x = element_text(hjust = 0.5)
+    )
+
+  # Create the histogram
+  histogram <- ggplot(data, aes(x = .data[[variable]])) +
+    geom_histogram(binwidth = bins, fill = "orange", color = "black") +
+    theme_minimal() +
+    theme(
+      panel.background = element_rect(fill = "white")
+    ) +
+    labs(x = variable, y = "Count") +
+    theme_classic()
+
+  # Create the boxplot
+  boxplot <- ggplot(data, aes(y = .data[[variable]])) +
+    geom_boxplot(fill = "orange", color = "black") +
+    theme_minimal() +
+    theme(
+      panel.background = element_rect(fill = "white")
+    ) +
+    labs(x = "", y = variable) +
+    theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+  # Combine the plots using cowplot
+  combined_plot <- plot_grid(density_plot, histogram, boxplot, ncol = 3)
+
+  # Output the combined plot
+  print(combined_plot)
+}
+
+```
+
+Examining the 
+```{r}
+
+describe(coffee_clean$Total.Cup.Points)
+total_cup_points_plot = plot_combined_stats(coffee_clean, "Total.Cup.Points", bins =1)
+
+```
+The describe function indicates that the mean and the median of Total.Cup.Points are close to each other which indicates symmetry in distribution. The standard deviation is 2.68 indicating low variability from the mean. Kurtosis is greater than 8.99 suggesting fatter tails and the skewness of -1.84 indicates its is negatively skewed. 
+
+Just by visualizing we can see that there is a peak of the Total.Cup.Points a little above the score of 80 and we can also see that the variable has many outliers, especially on the lower whisker. We can see lowest value is 60 for the score and this skews sighyly to the left. There don't seem to be much variability in the data from the mean, such that the values are concentrated from teh range of 82 to 83, with 50% of the observation falling within this range. 
+
+Examining the distribution of the Grade variables also important. Since this is a categorical variable we will conduct frequency count and plot a barchart.
+```{r}
+table(coffee_clean$Grade)
+
+# Calculate the percentage of each grade
+grade_percentages <- prop.table(table(coffee$Grade)) * 100
+
+# Create a data frame with grade levels and percentages
+grade_data <- data.frame(Grade = names(grade_percentages),
+                         Percentage = as.numeric(grade_percentages))
+
+# Reorder grade levels based on percentage
+grade_data$Grades <- factor(grade_data$Grade, levels = grade_data$Grade[order(-grade_data$Percentage)])
+
+# Create the plot using ggplot2
+barplot_grades <- ggplot(grade_data, aes(x = Grades, y = Percentage, fill = Grades)) +
+  geom_bar(stat = "identity", alpha = 0.5, fill = "orange") +
+  labs(title = "Distribution of Coffee Grades",
+       x = "Grade", y = "Percentage") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+# Display the plot
+print(barplot_grades)
+```
+
+Grade is imbalanced, we can see that 80% of the observations fall under the "Very Good" factor level. Where as the "Outstanding" factor has only one observation. This create problems when conducting analysis because it can cause over fitting, poor minority class detection, and mislead our metric evaluation when checking the fitness of our model.Before building our model we must handle such imbalances, with different techniques. 
+
+# Categorical EDA
+
+## Functions Used
+
+We will be using various plotting function in order to create a visual understanding of the categorical variables. We will examine the frequency, the different grades that the factors of a categorical variable have, and we will see the distribution of the Total.Cup.Points for each category for any insight. 
+
+```{r}
+# This is a simple plot that is based on frequency
+barplot_categorical <- function(data, category_variable, top_n) {
+  category_variable <- rlang::sym(category_variable)
+
+  data %>%
+    mutate(!!rlang::quo_name(category_variable) := as.character(!!category_variable)) %>%
+    group_by(!!category_variable) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    arrange(desc(n)) %>%
+    slice_head(n = top_n) %>%
+    mutate(!!rlang::quo_name(category_variable) := fct_reorder(!!category_variable, n)) %>%
+    ggplot(aes(x = fct_reorder(!!category_variable, n), y = n, fill = "orange")) +
+    geom_bar(stat = "identity", show.legend = FALSE) +
+    labs(title = paste("Top", top_n, rlang::quo_name(category_variable)),
+         x = rlang::quo_name(category_variable),
+         y = "Frequency") +
+    scale_fill_manual(values = "orange") +
+    theme(
+      panel.background = element_rect(fill = "white"),
+      axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 15)) + 
+      coord_flip()
+      
+}
+
+# This is a category by category plot that will show us the different grades that are within the category variable. We can see which one is dominant and which one is present in the categorical variables we inspect. 
+barplot_by_grade <- function(data, category_variable, fill_variable, top_n) {
+  category_variable <- rlang::sym(category_variable)
+  fill_variable <- rlang::sym(fill_variable)
+
+  data %>%
+    mutate(
+      !!rlang::quo_name(category_variable) := as.character(!!category_variable),
+      !!rlang::quo_name(fill_variable) := as.factor(!!fill_variable)
+    ) %>%
+    group_by(!!category_variable, !!fill_variable) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    arrange(desc(n)) %>%
+    group_by(!!category_variable) %>%
+    mutate(total_freq = sum(n)) %>%
+    ungroup() %>%
+    mutate(!!rlang::quo_name(category_variable) := fct_reorder(!!category_variable, total_freq)) %>%
+    ggplot(aes(x = !!category_variable, y = n, fill = !!fill_variable)) +
+    geom_bar(stat = "identity") +
+    labs(
+      title = paste("Top", top_n, category_variable),
+      x = rlang::quo_name(category_variable),
+      y = "Frequency"
+    ) +
+    scale_fill_manual(values = scales::brewer_pal(palette = "Oranges")(length(unique(data[[fill_variable]])))) +
+    theme(
+      panel.background = element_rect(fill = "white"),
+      axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 15),
+      #axis.title.x = element_text(size = 15),
+      #axis.title.y = element_text(size = 15),
+      #legend.title = element_text(size = 15),
+      #legend.text = element_text(size = 12),
+      legend.position = "right",
+      axis.ticks.length = unit(0.2, "cm"),
+      legend.background = element_rect(fill = "white", color = "black")
+    ) +
+    coord_flip()
+}
+
+# This plot displays the range, the mean and the median of the Total.Cup.Points for the category we will be inspecting. 
+plot_summary_statistics <- function(data, categorical_variable, numerical_variable) {
+  ggplot(data = data) +
+    stat_summary(
+      mapping = aes(x = !!rlang::sym(categorical_variable), y = !!rlang::sym(numerical_variable)),
+      fun.min = min,
+      fun.max = max,
+      fun = median,
+      geom = "linerange",  
+      color = "orange",  
+      size = 0.5  
+    ) +
+    stat_summary(
+      mapping = aes(x = !!rlang::sym(categorical_variable), y = !!rlang::sym(numerical_variable)),
+      fun = mean,
+      geom = "point",  # Use point for the mean
+      shape = 4,  # Set point shape to X
+      color = "blue",  # Set point color to blue
+      size = 1.5  # Adjust point size
+    ) +
+    stat_summary(
+      mapping = aes(x = !!rlang::sym(categorical_variable), y = !!rlang::sym(numerical_variable)),
+      fun = median,
+      geom = "point",  # Use point for the median dot
+      color = "black",  # Set dot color to black
+      size = 1.5  # Adjust dot size
+    ) +
+    theme_minimal() +  # Set a minimal theme
+    theme(
+      panel.background = element_rect(fill = "white")
+    ) +
+    coord_flip()  # Flip the coordinates
+}
+
+
+# Visualizing the distribution, median and central tendency of the Total.Cup.Point to each categorical variables with the outliers. 
+boxplot_without_outliers <- function(data, categorical_variable, numerical_variable) {
+  ggplot(data = data) +
+    geom_boxplot(
+      mapping = aes_string(x = categorical_variable, y = numerical_variable),
+      color = "orange",  # Set box color to orange
+      fill = "white",  # Set fill color to white
+      width = 0.75,
+      outlier.shape = NA  # Removing outliers
+    ) +
+    stat_summary(
+      mapping = aes_string(x = categorical_variable, y = numerical_variable),
+      fun = median,
+      geom = "point",  # Median will be represented by a black dot
+      color = "black",
+      size = 1.5
+    ) +
+    theme_minimal() +
+    theme(
+      panel.background = element_rect(fill = "white"),
+      axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 15)
+    ) +
+    coord_flip()
+}
+
+# Visualizing the distribution, median and central tendency of the Total.Cup.Point to each categorical variables with the outliers
+boxplot_with_outliers <- function(data, categorical_variable, numerical_variable) {
+  ggplot(data = data) +
+    geom_boxplot(
+      mapping = aes_string(x = categorical_variable, y = numerical_variable),
+      color = "orange",  # Set box color to orange
+      fill = "white",  # Set fill color to white
+      width = 0.75  # Adjust box width if needed
+    ) +
+    stat_summary(
+      mapping = aes_string(x = categorical_variable, y = numerical_variable),
+      fun = median,
+      geom = "point",  # Use point for the median dot
+      position = position_dodge(width = 0.75),  # Adjust dodge width if needed
+      color = "black",  # Set dot color to black
+      size = 1.5  # Adjust dot size
+    ) +
+    theme_minimal() +  # Set a minimal theme
+    theme(
+      panel.background = element_rect(fill = "white"),
+      axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 15)  # Set background to white
+    ) +
+    coord_flip()  # Flip the coordinates
+}
+
+
+#This function plots the mean of the Total.Cup.Points grouped by the categorical variables. 
+plot_mean_by_category <- function(data, category_variable, numerical_variable) {
+  # Ensure the variables are symbols
+  category_variable <- rlang::sym(category_variable)
+  numerical_variable <- rlang::sym(numerical_variable)
+
+  # Convert the numerical variable to numeric, and handle non-numeric values
+  data <- data %>%
+    mutate({{ numerical_variable }} := as.numeric(as.character({{ numerical_variable }})))
+
+  # If there are any NAs introduced by coercion, replace them with the mean of the non-NA values
+  if (any(is.na(data[[rlang::quo_name(numerical_variable)]]))) {
+    mean_value <- mean(data[[rlang::quo_name(numerical_variable)]], na.rm = TRUE)
+    data <- data %>%
+      mutate({{ numerical_variable }} := ifelse(is.na({{ numerical_variable }}), mean_value, {{ numerical_variable }}))
+  }
+
+  # Now you can summarise and plot your data with coord_flip()
+  data %>%
+    group_by({{ category_variable }}) %>%
+    summarise(mean_value = mean({{ numerical_variable }}, na.rm = TRUE)) %>%
+    arrange(desc(mean_value)) %>%
+    ggplot(aes(x = reorder({{ category_variable }}, mean_value), y = mean_value)) +
+    stat_summary(
+      fun = "mean",
+      geom = "point",
+      color = "orange",
+      size = 2
+    ) +
+    theme_minimal() +
+    theme(
+      panel.background = element_rect(fill = "white"),
+      axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 15)
+    ) +
+    coord_flip()  # Add coord_flip() to flip the plot
+}
+
+
+```
+
+#### Variety
+
+```{r}
+unique(coffee_clean$Variety)
+length(unique(coffee_clean$Variety))
+```
+
+We have 30 different types of variety in the data set. We will see which one is the most frequently occurring in other words the most popular variety, and how each variety is decomposed of the different grades. Viewing the distribution of each category with respect to  the Total.Cup.Points is also important and finally we will group each category and calculate the mean of the Total.Cup.Points. This will be conducted for all of the categorical variables.  
+
+```{r, warning = FALSE}
+
+variety0 <- barplot_categorical(coffee_clean, "Variety", 30)
+variety1 <- barplot_by_grade(coffee_clean, "Variety", "Grade", 30)
+variety2 <- plot_summary_statistics(coffee_clean, "Variety", "Total.Cup.Points")
+variety3 <- boxplot_without_outliers(coffee_clean, "Variety", "Total.Cup.Points")
+variety4<- boxplot_with_outliers(coffee_clean, "Variety", "Total.Cup.Points")
+variety5 <- plot_mean_by_category(coffee_clean, "Variety", "Total.Cup.Points")
+combined_plot_variety0 = variety0 + variety5
+combined_plot_variety1 = variety2 + variety3  
+combined_plot_variety2 = variety4 + variety1
+
+
+print(combined_plot_variety0)
+print(combined_plot_variety1)
+print(combined_plot_variety2)
+
+```
+
+We could see that Caturra, Bourbon, Typica are the most occurring variables. We can also see that unknown values and other variety are within the factors. Also the outstanding coffee grade is in the missing variable. The Catuai variety, has the most variability when plotting the varieties against the Total Cup Points. Then followed by Caturra and Bourbon. Ethiopian Yigracheffe has the highest median point compared to the rest. Also a couple of the observation that are from the Unknown, Other and Bourbon, have the high total cup points.
+
+As we saw since the data set is imbalance it would be best to visualize the mean of the different varieties. We can see that Ethiopian Yirgacheffe coffee variety followed by Sumatra Lington, SL34 and SL28 and the Sumatra have a higher mean in total cup points. What is interesting is that Sumatra Linton and its variation SL34, SL28 and Sumatra as well as SL14 all take from top 2 to top 6 of the coffee variety.
+
+One thing that stands out is that there are levels within the categorical variable that do have low occurrence but are pertinent in determining the quality of the coffee. In order to show this let us create a table of the occurrences. 
+```{r}
+table(coffee_clean$Variety)
+```
+For example, the Ethiopian Yigracheffe and the Sumatra Lintong have very few occurrences however they account for the one one of the highest mean of total cup points. This is not exclusive to only high grade coffee, we can also see that Java variety has only two occurrences but its mean total score is not positioned not high relative to other varieties. But beyond the rarity levels with fewer occurrences will pose challenges when splitting the data in the modeling stage. It is important to handle this before moving on the modeling stage. So we take note of this for now to hanle it at the end of this section. 
+
+
+### Color
+
+```{r}
+unique(coffee_clean$Color)
+length(unique(coffee_clean$Color))
+```
+There are five different unique values for the categorical variable color. 
+
+```{r}
+color0 <- barplot_categorical(coffee_clean, "Color", 5)
+color1 <- barplot_by_grade(coffee_clean, "Color", "Grade", 5)
+color2 <- plot_summary_statistics(coffee_clean, "Color", "Total.Cup.Points")
+color3 <- boxplot_without_outliers(coffee_clean, "Color", "Total.Cup.Points")
+color4<- boxplot_with_outliers(coffee_clean, "Color", "Total.Cup.Points")
+color5 <- plot_mean_by_category(coffee_clean, "Color", "Total.Cup.Points")
+
+combined_plot_color0 = color0 + color1 
+combined_plot_color1 = color2 + color3 
+combined_plot_color2 = color4 + color5
+
+print(combined_plot_color0)
+print(combined_plot_color1)
+print(combined_plot_color2)
+```
+
+The most occurring type of color is green then followed by unknown and then bluish green and blue green. The Bluish Green and the Blue Green account for a small amount of commodity grades within them. The Green color accounts mostly for the Very Good whereas the Excellent are very few in all of the colors. Since outstanding is also barely present in the data we cannot visually tell apart in which color it falls.
+
+As expected that the Green has a lot of variability followed by the None and then the Blue-Green then Bluish Green.The Blue-Green and the Blueish-Green color yield a higher mean total cup points. Followed by the Green and the None.
+
+### Processing Method
+
+```{r}
+unique(coffee_clean$Processing.Method)
+length(unique(coffee_clean$Processing.Method))
+```
+There are six different processes used for green beans. 
+
+```{r}
+processing_method0 <-barplot_categorical(coffee_clean, "Processing.Method", 6)
+processing_method1 <- barplot_by_grade(coffee_clean, "Processing.Method", "Grade", 6)
+processing_method2 <- plot_summary_statistics(coffee_clean, "Processing.Method", "Total.Cup.Points")
+processing_method3 <- boxplot_without_outliers(coffee_clean, "Processing.Method", "Total.Cup.Points")
+processing_method4<- boxplot_with_outliers(coffee_clean, "Processing.Method", "Total.Cup.Points")
+processing_method5 <- plot_mean_by_category(coffee_clean, "Processing.Method", "Total.Cup.Points")
+
+
+combined_plot_processing0 = processing_method0 + processing_method1 
+combined_plot_processing1 = processing_method2 + processing_method3
+combined_plot_processing2 = processing_method4  + processing_method5
+
+print(combined_plot_processing0)
+print(combined_plot_processing1)
+print(combined_plot_processing2)
+
+
+```
+
+The most common method that is used is the Washed/Wet process followed by the Natural Dry. Then there are less than 200 values that are missing within the processing method. Semi-washed or semi-pulped and pulped natural are not very common methods for processing coffee.
+
+We can see that the washed/wet process and the natural dry process produce a fair amount of very good coffee grades. Where as the the missing  and the semi-washed or semi pulped have fewer commodity than the rest of the processing method. The other methods pulped natural/honey methods only produce very good coffee.
+
+The pupled/honey yields the highest mean in total cup points followed by the semi-washed and the washed.
+
+
+### Country of Origin
+
+```{r}
+unique(coffee_clean$Country.of.Origin)
+length(unique(coffee_clean$Country.of.Origin))
+```
+There are 37 different countries in the data set.In the levels we can see that the level "Cote d?Ivoire" could be renamed.
+
+```{r}
+country0 <- barplot_categorical(coffee_clean, "Country.of.Origin", 37)
+country1 <- barplot_by_grade(coffee_clean, "Country.of.Origin", "Grade", 37)
+country2 <- plot_summary_statistics(coffee_clean, "Country.of.Origin", "Total.Cup.Points")
+country3 <- boxplot_without_outliers(coffee_clean, "Country.of.Origin", "Total.Cup.Points")
+country4 <- boxplot_with_outliers(coffee_clean, "Country.of.Origin", "Total.Cup.Points")
+country5 <- plot_mean_by_category(coffee_clean, "Country.of.Origin", "Total.Cup.Points")
+
+
+combined_plot_country0 = country0 +  country5
+combined_plot_country1 =  country2 +  country3
+combined_plot_country2 =  country4  + country2
+
+print(combined_plot_country0)
+print(combined_plot_country1)
+print(combined_plot_country2)
+
+```
+The most occurring country in the data set is Mexico, even though it is not the largest producer of coffee. Followed by Columbia, Guatemala and Brazil. It is evident that the data set has many South American countries.When the data is separated it is evident which country has the outstanding coffee which is Ethiopia. Another interesting insight is that United States predominantly produces excellent coffee with a small number graded as very good coffee.
+
+When inspecting the box plot we can see that there is a great variability of grades for different countries. Further more when observing the mean we can see that Unites States, Papua New Guinea and Ethiopia are the top three in terms of high mean total cup points.
+
+```{r}
+table(coffee$Country.of.Origin)
+```
+As we saw from the visualizations there are some countries with few observation. These countries include Papau New Guinea which has only one observation but is also rated in the top when compared in terms of total cup score mean. On the other hand India has also only one observation but has the lowest mean total score. In this data set these countries are rare countries. 
+
+### Country Partners
+
+```{r}
+unique(coffee$In.Country.Partner)
+length(unique(coffee$In.Country.Partner))
+```
+There are 27 in country partners. When evaluating the names we see that there are some levels that are the same and could be renamed in order to avoid redundancy. We can see that for example that Blossom Valley International appears twice, but due to difference in spelling or data entry error it is being considered as two levels. Another similar instance is for a level registered as "Specialty Coffee Ass" which needs further investigation to pinpoint it could be renamed to since countries have their own SCA. 
+
+```{r}
+
+partner0 <- barplot_categorical(coffee_clean, "In.Country.Partner", 27)
+partner1 <- barplot_by_grade(coffee_clean, "In.Country.Partner", "Grade", 27)
+partner2 <- plot_summary_statistics(coffee_clean, "In.Country.Partner", "Total.Cup.Points")
+partner3 <- boxplot_without_outliers(coffee_clean, "In.Country.Partner", "Total.Cup.Points")
+partner4 <- boxplot_with_outliers(coffee_clean, "In.Country.Partner", "Total.Cup.Points")
+partner5 <- plot_mean_by_category(coffee, "In.Country.Partner", "Total.Cup.Points")
+
+combined_plot_partner0 = partner0 +  partner1
+combined_plot_partner1 =  partner2 +  partner3
+combined_plot_partner2 =  partner4  + partner5
+
+print(combined_plot_partner0)
+print(combined_plot_partner1)
+print(combined_plot_partner2)
+
+```
+
+```{r}
+table(coffee_clean$In.Country.Partner)
+```
+We see the same issue with the categorical variables for the partners as we saw in the variety, some of the levels have few occurrences. For example "Central De Organizaciones Productoras De Café y Cacao Del Perú - Central Café & Cacao" level has only one observation and this will also pose challenges when splitting the data thus it must be reviewed carefully. 
+
+
+# Numeric Values 
+
+## Univariate
+
+In this section we will use histogram, density plot and box plot to see the structure of the numerical variables. 
+
+```{r, warning = FALSE}
+coffee_long <- coffee_clean %>%
+  mutate(across(everything(), as.character)) %>%
+  pivot_longer(cols = everything(),
+               names_to = "variable",
+               values_to = "value") %>%
+  filter(!is.na(as.numeric(value)))
+```
+
+The code above transforms the data frame into a long format, this means that each row will be a single observation for a variable, then it proceeded to filter out the rows that cannot be converted into numeric, in other words drops the categorical variables. Based on this transformation we will conduct our visual representation for the numeric variables. 
+
+```{r, warning = FALSE}
+coffee_histograms <- coffee_long %>%
+  filter(!is.na(as.numeric(value))) %>%
+  mutate(value = as.numeric(value)) %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 20, color = "black", fill = "orange") +
+  facet_wrap(~variable, scales = "free", ncol = 4) +
+  labs(title = "Histograms of Numeric Variables",
+       x = "Value",
+       y = "Frequency") +
+  theme_minimal()
+
+print(coffee_histograms)
+
+coffee_density <- coffee_long %>%
+  filter(!is.na(value) & is.finite(as.numeric(value))) %>%
+  ggplot(aes(x = as.numeric(value))) +
+  geom_density(fill = "orange", color = "black") +
+  facet_wrap(~variable, scales = "free", ncol = 4) +
+  labs(title = "Density Plots of Numeric Variables with Normality Trace",
+       x = "Value",
+       y = "Density") +
+  theme_minimal()
+
+print(coffee_density)
+
+coffee_box_plots <- coffee_long %>%
+  filter(!is.na(value) & is.finite(as.numeric(value))) %>%
+  ggplot(aes(y = as.numeric(value))) +
+  geom_boxplot(fill = "orange", color = "black")  +
+  facet_wrap(~variable, scales = "free", ncol = 4) +
+  labs(title = "Box Plots of Numeric Variables with Normality Trace",
+       x = "",
+       y = "Value") +
+  theme_minimal()
+
+print(coffee_box_plots)
+
+```
+From the histogram we can see that the variables such as Category.One.Defects, Category.Two.Defects, Quakers and Total.Weight is right skewed with values concentrated on the smaller values. On the other hand Sweetness, Uniformity and Clean Cup are left skewed with values concentrated on the right side of the graph. Furthermore we can see that Moisture is bi-modal indicating there are two distinct groups with different coffee moisture levels. This is also prevalent when visualizing the box plot. We can see that we have many of the variables that have persistent outliers. Another thing that stands out the variable altitude_mean_meters_new has low values that are close to zero. This is worth investigating because altitude mean meters close to zero does not make sense. 
+
+
+```{r}
+print(subset(coffee, altitude_mean_meters_new < 100, select = c("Country.of.Origin", "altitude_mean_meters_new", "In.Country.Partner", "Region")))
+```
+These values stand out and upon examination we can see that the values has 1 is from Kenya and since the region is not specified there is no way to verify the actual value or an estimate of the value. For now it would be best to remove the instance. 
+
+```{r}
+# Remove the row where altitude_mean_meters_new is 1 and Country.of.Origin is 'Kenya'
+coffee_clean <- subset(coffee_clean, !(altitude_mean_meters_new == 1 & Country.of.Origin == 'Kenya'))
+
+```
+
+Since most of the data is skewed and we have many instances of zeros in the data set we will visualize the data set by undertaking the log(x + 1) transformation. And see how the distribution changes and see if we can gain insights based on the transformation. 
+
+
+```{r}
+coffee_long <- coffee_clean %>%
+  mutate(across(everything(), as.character)) %>%
+  pivot_longer(cols = everything(),
+               names_to = "variable",
+               values_to = "value") %>%
+  filter(!is.na(as.numeric(value)))
+
+log_transform <- function(df) {
+  df %>%
+    mutate(across(where(is.numeric), ~ log(. + 1)))
+}
+
+coffee_histograms_log_transformed <- coffee_long %>%
+  filter(!is.na(as.numeric(value))) %>%
+  mutate(value = as.numeric(value)) %>%
+  log_transform() %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(aes(y = ..density..), bins = 20, color = "black", fill = "orange") +
+  facet_wrap(~variable, scales = "free", ncol = 4) +
+  labs(title = "Log-transformed Histograms of Numeric Variables",
+       x = "Value",
+       y = "Density") +
+  theme_minimal()
+
+
+print(coffee_histograms_log_transformed)
+
+
+coffee_density_log_transformed <- coffee_long %>%
+  filter(!is.na(as.numeric(value))) %>%
+  mutate(value = as.numeric(value)) %>%
+  log_transform() %>%
+  ggplot(aes(x = value)) +
+  geom_density(fill = "orange", color = "black") +
+  facet_wrap(~variable, scales = "free", ncol = 4) +
+  labs(title = "Log-transformed Density Plots of Numeric Variables",
+       x = "Value",
+       y = "Density") +
+  theme_minimal()
+
+print(coffee_density_log_transformed)
+
+
+coffee_box_plots_log_transformed <- coffee_long %>%
+  filter(!is.na(as.numeric(value))) %>%
+  mutate(value = as.numeric(value)) %>%
+  log_transform() %>%
+  ggplot(aes(y = value)) +
+  geom_boxplot(fill = "orange", color = "black")  +
+  facet_wrap(~variable, scales = "free", ncol = 4) +
+  labs(title = "Log-transformed Box Plots of Numeric Variables",
+       x = "",
+       y = "Value") +
+  theme_minimal()
+
+print(coffee_box_plots_log_transformed)
+
+
+```
+After conducting the log(x + 1) transformation the distribution for Category.Two.Defects and Total.Weight has changed. With both showing two distinct groups within the distributions and not having any outliers in that there are distinct groups within distributions. The transformation has not affected Quakers, Clean.Cup, Sweetness and Uniformity. Also there are outliers within the other values, but we will not treat them as they are valid values and represent with great quality coffee of bad quality coffee. 
+
+## Multivariate 
+
+In this section we will explore the relationship of the different variables. We will use correlation plot and scatter plot to visualize and determine what the relationship is with amongst each other.
+
+
+```{r}
+
+correlation_plot <- function(data) {
+  data %>%
+    # Select numerical columns
+    select(where(is.numeric)) %>%
+    # Compute the correlation matrix
+    cor(use = "complete.obs") %>%
+    # Convert the correlation matrix to a data frame
+    as.table() %>%
+    as.data.frame() %>%
+    # Create a scatter plot with correlation values
+    ggplot(aes(Var1, Var2, fill = Freq)) +
+      geom_tile(color = "white") +
+      scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                           midpoint = 0, limit = c(-1, 1), space = "Lab",
+                           name = "Correlation") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+      labs(title = "Correlation Plot of Numerical Values",
+           subtitle = "Color indicates correlation strength",
+           x = "Numerical Variables",
+           y = "Numerical Variables") +
+      geom_text(aes(Var1, Var2, label = sprintf("%.2f", Freq)),
+                color = "black", vjust = 1.5) +
+      coord_fixed() %>%
+    # Print the plot
+    print()
+}
+
+print(correlation_plot(coffee_clean))
+
+
+```
+
+Inspecting the correlation plot, it is evident that the values that are used to calculate the Total.Cup.Points such as the Aroma, Flavor, Aftertaste, Acidity, Body, Balance, Uniformity, Clean.Cup, Sweetness and Cupper.Points (subjective parameters) are all highly correlated with each other and with Total.Cup.Points. Whereas the objective parameters such as altitude, moisture the defects and the total weights indicate some correlation but not as strong. We will see if our transformation from the log has any impact on the correlation plot and compare them without the correlation plot without any transformation. 
+
+
+```{r}
+correlation_plot_log <- function(data) {
+  data %>%
+    # Select numerical columns
+    select(where(is.numeric)) %>%
+    # Apply log(x + 1) transformation
+    mutate(across(everything(), ~log(.x + 1))) %>%
+    # Compute the correlation matrix
+    cor(use = "complete.obs") %>%
+    # Convert the correlation matrix to a data frame
+    as.table() %>%
+    as.data.frame() %>%
+    # Create a scatter plot with correlation values
+    ggplot(aes(Var1, Var2, fill = Freq)) +
+      geom_tile(color = "white") +
+      scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                           midpoint = 0, limit = c(-1, 1), space = "Lab",
+                           name = "Correlation") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+      labs(title = "Correlation Plot of Numerical Values",
+           subtitle = "Color indicates correlation strength",
+           x = "Numerical Variables",
+           y = "Numerical Variables") +
+      geom_text(aes(Var1, Var2, label = sprintf("%.2f", Freq)),
+                color = "black", vjust = 1.5) +
+      coord_fixed() %>%
+    # Print the plot
+    print()
+}
+
+print(correlation_plot_log(coffee_clean))
+```
+From the transformation, it is evident that the data that are skewed such as Category.One.Defects, Category.Two.Defects and Total.Weight variables have improved in correlation with Total.Cup.Points which is used to derive the variable Grade. In this manner these values are right skewed and treating them with the log transformation. However on the other side altitude_mean_meters_new decreases with the log transformation thus it will not be treated. This is expected as the variables are right skewed and this will allow us to mitigate the extreme values. 
+
+
+```{r}
+coffee_clean <- coffee_clean %>%
+  mutate(
+    Log.Total.Weight = log(Total.Weight + 1),
+    Log.Category.One.Defects = log(Category.One.Defects + 1),
+    Log.Category.Two.Defects = log(Category.Two.Defects + 1))
+```
+
+
+### Objective Parameters Multivariate Analysis 
+
+In the following section we define the objective parameters as variables or features that are not used in the calculation for the Total.Cup.Points and are not based on the Q-graders personal opinions which may involve personal bias or variability among different observers. The objective parameters are values determined through ovservations, measurements or analysis and are measured based on facts. 
+
+
+
+```{r}
+
+# Define the relevant columns and color factor
+objective_parameters <- c("Total.Cup.Points", "Moisture", "Log.Category.One.Defects", "Quakers", "Log.Category.Two.Defects", "altitude_mean_meters_new",  "Log.Total.Weight")
+color_factor <- "Grade"
+color_levels <- levels(coffee_clean[[color_factor]])
+color_scale <- RColorBrewer::brewer.pal(length(color_levels), "Set1")
+
+
+create_scatter_plot_matrix <- function(data, relevant_columns, color_factor, plot_title) {
+  # Define color levels and scale
+  color_levels <- levels(data[[color_factor]])
+  color_scale <- RColorBrewer::brewer.pal(length(color_levels), "Set1")
+
+  # Create scatter plot matrix using ggpairs
+  data %>%
+    select(all_of(c(relevant_columns, color_factor))) %>%
+    mutate(across(all_of(color_factor), as.factor)) %>%
+    na.omit() %>%
+    mutate(count = ave(seq(nrow(.)), .[[color_factor]], FUN=length)) %>%
+    filter(count >= 2) %>%
+    select(-count) %>%
+    GGally::ggpairs(
+      columns = 1:(ncol(.) - 1),  # Exclude color factor
+      upper = list(mapping = aes_string(color = color_factor, fill = color_factor)),
+      lower = list(mapping = aes_string(color = color_factor, fill = color_factor)),
+      diag = list(continuous = wrap("densityDiag", color = "orange")),  # Exclude distribution of numerical variables
+      title = plot_title
+    ) +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      text = ggplot2::element_text(size = 12),
+      panel.grid.major = ggplot2::element_blank(),
+      panel.grid.minor = ggplot2::element_blank(),
+      axis.line = ggplot2::element_line(color = "black")
+    ) +
+    ggplot2::scale_color_manual(values = color_scale, name = paste("Legend: ", color_levels)) +
+    ggplot2::scale_fill_manual(values = color_scale, name = paste("Legend: ", color_levels)) +
+    ggplot2::theme(legend.position = "top") -> scatter_plot_matrix
+
+  # Print the scatter plot matrix
+  print(scatter_plot_matrix)
+}
+
+create_scatter_plot_matrix(coffee_clean, objective_parameters, color_factor, "Objective Paramters Numerical")
+
+
+```
+
+From the scatter plot we can see that there is a weak positive correlation of Total.Cup.Points with altitude_mean_meters_new and Log.Total.Weight. What is surprising is that the correlation between Total.Cup.Points and Quakers has a very weak positive correlation. A more plausible assumption would of been that there would be a negative correlation and that more Quakers would reduce the quality or the grade of the coffee. On the other hand Log.Category.One.Defect, Log.Category.Two.Defect and Moisture are weakly negatively correlated. Form the scatter plot there are no linear relationship that is visible and no clear patterns that we can easily recognize. Let us examine to see if different plots have different plots. 
+
+```{r}
+create_scatter_plot_matrix_2 <- function(data, relevant_columns, color_factor, plot_title) {
+  # Define color levels and scale
+  color_levels <- levels(data[[color_factor]])
+  color_scale <- RColorBrewer::brewer.pal(length(color_levels), "Set1")
+
+  # Create scatter plot matrix using ggpairs
+  data %>%
+    select(all_of(c(relevant_columns, color_factor))) %>%
+    mutate(across(all_of(color_factor), as.factor)) %>%
+    na.omit() %>%
+    mutate(count = ave(seq(nrow(.)), .[[color_factor]], FUN=length)) %>%
+    filter(count >= 2) %>%
+    select(-count) %>%
+    GGally::ggpairs(
+      columns = 1:(ncol(.) - 1),  # Exclude color factor
+      upper = list(continuous = wrap("smooth", method = "lm", se = FALSE, color = "orange", size = 1),
+                   mapping = aes_string(color = color_factor, fill = color_factor)),
+      diag = list(continuous = wrap("densityDiag", color = "orange")),
+      lower = list(mapping = aes_string(color = color_factor, fill = color_factor)),
+      title = plot_title
+    ) +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      text = ggplot2::element_text(size = 12),
+      panel.grid.major = ggplot2::element_blank(),
+      panel.grid.minor = ggplot2::element_blank(),
+      axis.line = ggplot2::element_line(color = "black")
+    ) +
+    ggplot2::scale_color_manual(values = color_scale, name = paste("Legend: ", color_levels)) +
+    ggplot2::scale_fill_manual(values = color_scale, name = paste("Legend: ", color_levels)) +
+    ggplot2::theme(legend.position = "top") -> scatter_plot_matrix
+
+  # Print the scatter plot matrix
+  print(scatter_plot_matrix)
+}
+
+create_scatter_plot_matrix_2(coffee_clean, objective_parameters, color_factor, "Objective Parameters Numerical and Linear Relationships of Grades")
+```
+
+Adding the lines to the scatter plot of the different grades of coffee we can see how each factor level behaves and what ranges of values it takes on. For instance, for the moisture predictor, we can see that excellent grades values start from zero but do not extend to the entire range of values. Where as the coffee grade very good and commodity extend to the entire range of values. Similarly for quakers the commodity grade has a weak positive correlation but doesn't extend to the full range of values that are available in the graph. The excellent grade coffee has a negative correlation and also doesn't extend to the entire range of the variable. Whereas the altitude has the excellent coffee grade starts a little higher values and extends to the maximum value of the variable. On the other hand commodity start off little higher values but doesn't extend to the full values of the predictor. 
+
+
+### Subjective Parameters Numerical Multivariate Analysis 
+
+The section above investigated the objective parameters in this section we see the values that are used to calculate the Total.Cup.Points and how each of the different variable interact with each other. Since these values are based on the Q-Graders personal preferences and are used to calculate the Total.Cup.Points we would expect to see a strong linear relationship with each other. 
+
+
+```{r}
+subjective_parameters <-c("Total.Cup.Points", "Aroma", "Flavor", "Aftertaste", "Acidity", "Body", "Balance", "Uniformity", "Clean.Cup", "Sweetness", "Cupper.Points")
+
+create_scatter_plot_matrix(coffee_clean, subjective_parameters, color_factor, "Subjective Parameters Numerical")
+```
+
+As oppose to the objective parameters we can see that there is a clear linear relationship with the subjective parameters, especially for the Aroma, Flavor, Aftertaste, Body, Balance and Cupper.Points. The plot also show us that these variables are correlated amongst each other. Even though we cannot distinctly easily visualize that the positive correlation for Uniformity. Clean.Cup and Sweetness the correlation indicated that there is positive correlation with Total.Cup.Points but not as strong as the ones formerly stated. These variables are also not as correlated with the other variables and with each other as the ones stated above. To see how the different grades range within the variables, we will use similar approach as the objective parameters and draw the corresponding linear relationship of each of the variable. 
+
+```{r}
+create_scatter_plot_matrix_2(coffee_clean, subjective_parameters, color_factor, "Subjective Parameters Numerical with Linear Relationships of Grades")
+```
+
+
